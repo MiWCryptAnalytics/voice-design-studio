@@ -1,0 +1,14 @@
+# Voice Design Studio — verified working set (Python 3.14, CUDA 13, RTX 3090)
+#
+# NOTE ON transformers: the `qwen3_tts` architecture is NOT in upstream
+# transformers. The `qwen-tts` package supplies the config/model/processor
+# classes and pins transformers to 4.57.3. Do not upgrade transformers past
+# that pin — transformers 5.x has no qwen3_tts and the model will not load.
+
+PyQt6==6.11.0
+torch==2.13.0
+transformers==4.57.3
+qwen-tts==0.1.1
+accelerate==1.12.0
+soundfile==0.14.0
+numpy==2.4.6

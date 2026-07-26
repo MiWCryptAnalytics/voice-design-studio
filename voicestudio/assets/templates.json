@@ -1,0 +1,484 @@
+{
+  "version": 1,
+  "demo_sentence": "The quiet between two thoughts is where the whole story hides.",
+  "demo_seed": 20260725,
+  "templates": [
+    {
+      "id": "nature-documentary",
+      "name": "Nature Documentary",
+      "category": "Narration",
+      "instruct": "An older British man with a warm, gravelly baritone, speaking slowly and with hushed reverence, as if narrating footage of animals at dawn.",
+      "tags": [
+        "male",
+        "british",
+        "warm",
+        "slow",
+        "documentary"
+      ],
+      "traits": {
+        "age": "older",
+        "subject": "man",
+        "timbre": "gravelly",
+        "accent": "British",
+        "pace": "slow",
+        "pitch": "low",
+        "energy": "calm",
+        "emotion": "reverent",
+        "texture": "gravelly",
+        "style": "documentary"
+      }
+    },
+    {
+      "id": "audiobook-storyteller",
+      "name": "Audiobook Storyteller",
+      "category": "Narration",
+      "instruct": "A middle-aged woman with a smooth, mellow voice, reading at an unhurried, even pace with gentle warmth and very clear articulation.",
+      "tags": [
+        "female",
+        "smooth",
+        "warm",
+        "audiobook"
+      ],
+      "traits": {
+        "age": "middle-aged",
+        "subject": "woman",
+        "timbre": "smooth",
+        "accent": "neutral",
+        "pace": "measured",
+        "pitch": "mid",
+        "energy": "calm",
+        "emotion": "warm",
+        "texture": "clean",
+        "style": "audiobook"
+      }
+    },
+    {
+      "id": "epic-trailer",
+      "name": "Epic Trailer",
+      "category": "Narration",
+      "instruct": "A man with an enormous, gravelly bass voice, speaking slowly and dramatically with immense weight and steadily building intensity.",
+      "tags": [
+        "male",
+        "bass",
+        "dramatic",
+        "trailer"
+      ],
+      "traits": {
+        "age": "middle-aged",
+        "subject": "man",
+        "timbre": "deep",
+        "accent": "American",
+        "pace": "slow",
+        "pitch": "very low",
+        "energy": "moderate",
+        "emotion": "dramatic",
+        "texture": "gravelly",
+        "style": "theatrical"
+      }
+    },
+    {
+      "id": "fantasy-bard",
+      "name": "Fantasy Bard",
+      "category": "Narration",
+      "instruct": "A theatrical man with a rich, resonant voice and a lyrical British lilt, speaking grandly with dramatic rhythm and flourish.",
+      "tags": [
+        "male",
+        "british",
+        "theatrical",
+        "fantasy"
+      ],
+      "traits": {
+        "age": "adult",
+        "subject": "man",
+        "timbre": "warm",
+        "accent": "British",
+        "pace": "measured",
+        "pitch": "mid",
+        "energy": "energetic",
+        "emotion": "dramatic",
+        "texture": "clean",
+        "style": "theatrical"
+      }
+    },
+    {
+      "id": "southern-storyteller",
+      "name": "Southern Storyteller",
+      "category": "Narration",
+      "instruct": "An older man with a warm, drawling Southern accent, speaking slowly and good-naturedly with a chuckle beneath his words.",
+      "tags": [
+        "male",
+        "southern",
+        "warm",
+        "folksy"
+      ],
+      "traits": {
+        "age": "older",
+        "subject": "man",
+        "timbre": "warm",
+        "accent": "Southern US",
+        "pace": "slow",
+        "pitch": "low",
+        "energy": "relaxed",
+        "emotion": "warm",
+        "texture": "clean",
+        "style": "audiobook"
+      }
+    },
+    {
+      "id": "broadcast-anchor",
+      "name": "Broadcast Anchor",
+      "category": "Informational",
+      "instruct": "A composed news anchor with a crisp, authoritative mid-range voice, measured pacing, and precise neutral diction.",
+      "tags": [
+        "neutral",
+        "authoritative",
+        "news"
+      ],
+      "traits": {
+        "age": "adult",
+        "subject": "person",
+        "timbre": "bright",
+        "accent": "neutral",
+        "pace": "measured",
+        "pitch": "mid",
+        "energy": "moderate",
+        "emotion": "neutral",
+        "texture": "clean",
+        "style": "broadcast"
+      }
+    },
+    {
+      "id": "corporate-elearning",
+      "name": "Corporate eLearning",
+      "category": "Informational",
+      "instruct": "A friendly, professional woman with a clear, neutral voice, speaking at a steady instructional pace, patient and encouraging.",
+      "tags": [
+        "female",
+        "clear",
+        "instructional"
+      ],
+      "traits": {
+        "age": "adult",
+        "subject": "woman",
+        "timbre": "bright",
+        "accent": "neutral",
+        "pace": "measured",
+        "pitch": "mid",
+        "energy": "moderate",
+        "emotion": "warm",
+        "texture": "clean",
+        "style": "broadcast"
+      }
+    },
+    {
+      "id": "conversational-podcast",
+      "name": "Conversational Podcast",
+      "category": "Informational",
+      "instruct": "A relaxed man in his thirties with a natural, slightly nasal voice, speaking casually with easy pacing and light conversational energy.",
+      "tags": [
+        "male",
+        "casual",
+        "natural",
+        "podcast"
+      ],
+      "traits": {
+        "age": "adult",
+        "subject": "man",
+        "timbre": "nasal",
+        "accent": "American",
+        "pace": "measured",
+        "pitch": "mid",
+        "energy": "relaxed",
+        "emotion": "neutral",
+        "texture": "clean",
+        "style": "intimate mic"
+      }
+    },
+    {
+      "id": "explainer-voice",
+      "name": "Explainer Voice",
+      "category": "Informational",
+      "instruct": "A bright young man with a light, articulate voice, speaking briskly and clearly with an upbeat, curious tone.",
+      "tags": [
+        "male",
+        "young",
+        "bright",
+        "brisk"
+      ],
+      "traits": {
+        "age": "young",
+        "subject": "man",
+        "timbre": "bright",
+        "accent": "neutral",
+        "pace": "brisk",
+        "pitch": "mid",
+        "energy": "energetic",
+        "emotion": "cheerful",
+        "texture": "clean",
+        "style": "broadcast"
+      }
+    },
+    {
+      "id": "upbeat-commercial",
+      "name": "Upbeat Commercial",
+      "category": "Commercial",
+      "instruct": "A bright, energetic young woman with a clear, punchy voice, speaking quickly with a confident smile and rising enthusiasm.",
+      "tags": [
+        "female",
+        "energetic",
+        "punchy",
+        "ad"
+      ],
+      "traits": {
+        "age": "young",
+        "subject": "woman",
+        "timbre": "bright",
+        "accent": "American",
+        "pace": "fast",
+        "pitch": "high",
+        "energy": "energetic",
+        "emotion": "cheerful",
+        "texture": "clean",
+        "style": "commercial"
+      }
+    },
+    {
+      "id": "luxury-brand",
+      "name": "Luxury Brand",
+      "category": "Commercial",
+      "instruct": "A poised woman with a low, velvety, restrained voice, speaking slowly and softly with elegant, deliberate pauses.",
+      "tags": [
+        "female",
+        "velvety",
+        "elegant",
+        "slow"
+      ],
+      "traits": {
+        "age": "adult",
+        "subject": "woman",
+        "timbre": "silky",
+        "accent": "neutral",
+        "pace": "very slow",
+        "pitch": "low",
+        "energy": "calm",
+        "emotion": "neutral",
+        "texture": "breathy",
+        "style": "commercial"
+      }
+    },
+    {
+      "id": "sports-commentator",
+      "name": "Sports Commentator",
+      "category": "Commercial",
+      "instruct": "An excitable man with a loud, hoarse, high-energy voice, speaking rapidly with explosive emphasis and rising urgency.",
+      "tags": [
+        "male",
+        "loud",
+        "urgent",
+        "sports"
+      ],
+      "traits": {
+        "age": "adult",
+        "subject": "man",
+        "timbre": "raspy",
+        "accent": "American",
+        "pace": "fast",
+        "pitch": "high",
+        "energy": "explosive",
+        "emotion": "excited",
+        "texture": "raspy",
+        "style": "broadcast"
+      }
+    },
+    {
+      "id": "late-night-radio",
+      "name": "Late-Night Radio DJ",
+      "category": "Commercial",
+      "instruct": "A man in his forties with a deep, velvety, breathy voice, speaking slowly and intimately close to the microphone, relaxed and unhurried.",
+      "tags": [
+        "male",
+        "deep",
+        "breathy",
+        "intimate"
+      ],
+      "traits": {
+        "age": "middle-aged",
+        "subject": "man",
+        "timbre": "deep",
+        "accent": "American",
+        "pace": "slow",
+        "pitch": "very low",
+        "energy": "relaxed",
+        "emotion": "warm",
+        "texture": "breathy",
+        "style": "intimate mic"
+      }
+    },
+    {
+      "id": "sinister-villain",
+      "name": "Sinister Villain",
+      "category": "Character",
+      "instruct": "A refined older man with a silky, cold voice, speaking softly and deliberately with menacing precision and a faint amused lilt.",
+      "tags": [
+        "male",
+        "villain",
+        "cold",
+        "menacing"
+      ],
+      "traits": {
+        "age": "older",
+        "subject": "man",
+        "timbre": "silky",
+        "accent": "British",
+        "pace": "slow",
+        "pitch": "low",
+        "energy": "calm",
+        "emotion": "menacing",
+        "texture": "clean",
+        "style": "theatrical"
+      }
+    },
+    {
+      "id": "noir-detective",
+      "name": "Noir Detective",
+      "category": "Character",
+      "instruct": "A weary middle-aged man with a low, smoky, cynical voice, speaking in a slow, clipped, world-weary near-monotone.",
+      "tags": [
+        "male",
+        "smoky",
+        "weary",
+        "noir"
+      ],
+      "traits": {
+        "age": "middle-aged",
+        "subject": "man",
+        "timbre": "gravelly",
+        "accent": "American",
+        "pace": "slow",
+        "pitch": "low",
+        "energy": "relaxed",
+        "emotion": "weary",
+        "texture": "smoky",
+        "style": "intimate mic"
+      }
+    },
+    {
+      "id": "wise-elder",
+      "name": "Wise Elder",
+      "category": "Character",
+      "instruct": "A very old man with a frail, raspy but warm voice, speaking slowly and thoughtfully with long reflective pauses.",
+      "tags": [
+        "male",
+        "elderly",
+        "raspy",
+        "thoughtful"
+      ],
+      "traits": {
+        "age": "elderly",
+        "subject": "man",
+        "timbre": "raspy",
+        "accent": "neutral",
+        "pace": "very slow",
+        "pitch": "low",
+        "energy": "calm",
+        "emotion": "warm",
+        "texture": "raspy",
+        "style": "audiobook"
+      }
+    },
+    {
+      "id": "cheerful-kids-host",
+      "name": "Cheerful Kids' Host",
+      "category": "Character",
+      "instruct": "A playful, high-pitched young voice full of bouncy energy, speaking with exaggerated excitement and singsong intonation.",
+      "tags": [
+        "young",
+        "playful",
+        "high",
+        "children"
+      ],
+      "traits": {
+        "age": "young",
+        "subject": "person",
+        "timbre": "bright",
+        "accent": "neutral",
+        "pace": "brisk",
+        "pitch": "very high",
+        "energy": "energetic",
+        "emotion": "cheerful",
+        "texture": "clean",
+        "style": "theatrical"
+      }
+    },
+    {
+      "id": "anxious-character",
+      "name": "Anxious Character",
+      "category": "Character",
+      "instruct": "A young person with a thin, shaky voice, speaking quickly and unevenly with stammering hesitation and rising pitch.",
+      "tags": [
+        "young",
+        "shaky",
+        "nervous"
+      ],
+      "traits": {
+        "age": "young",
+        "subject": "person",
+        "timbre": "bright",
+        "accent": "neutral",
+        "pace": "fast",
+        "pitch": "high",
+        "energy": "moderate",
+        "emotion": "anxious",
+        "texture": "breathy",
+        "style": "intimate mic"
+      }
+    },
+    {
+      "id": "synthetic-ai",
+      "name": "Synthetic AI",
+      "category": "Stylized",
+      "instruct": "A flat, metallic, synthetic voice with even monotone pitch, mechanical pacing, and no emotional inflection.",
+      "tags": [
+        "robot",
+        "metallic",
+        "monotone"
+      ],
+      "traits": {
+        "age": "adult",
+        "subject": "person",
+        "timbre": "metallic",
+        "accent": "neutral",
+        "pace": "measured",
+        "pitch": "mid",
+        "energy": "calm",
+        "emotion": "neutral",
+        "texture": "metallic",
+        "style": "broadcast"
+      }
+    },
+    {
+      "id": "guided-meditation",
+      "name": "Guided Meditation",
+      "category": "Stylized",
+      "instruct": "A soft-spoken woman with an airy, breathy voice, speaking very slowly and calmly with long pauses and a soothing downward inflection.",
+      "tags": [
+        "female",
+        "breathy",
+        "soothing",
+        "slow"
+      ],
+      "traits": {
+        "age": "adult",
+        "subject": "woman",
+        "timbre": "breathy",
+        "accent": "neutral",
+        "pace": "very slow",
+        "pitch": "mid",
+        "energy": "calm",
+        "emotion": "soothing",
+        "texture": "breathy",
+        "style": "intimate mic"
+      }
+    }
+  ]
+}
