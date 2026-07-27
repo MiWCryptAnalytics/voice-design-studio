@@ -157,6 +157,62 @@ def main() -> int:
     check("verification presets cleaned up",
           all(VoiceLibrary.load().get(p) is None for p in (pinned.id, unpinned.id)))
 
+    # ---- max_new_tokens: the ceiling and its truncation flag ----
+    tiny = engine.synthesize(
+        SynthRequest(text=sentence, instruct=design, language="English",
+                     seed=8, max_new_tokens=32)
+    )
+    check("tiny token budget is flagged as truncated", tiny.truncated,
+          f"{tiny.codes} codes, {tiny.duration:.2f}s")
+    roomy = engine.synthesize(
+        SynthRequest(text=sentence, instruct=design, language="English", seed=8)
+    )
+    check("default budget is not flagged", not roomy.truncated,
+          f"{roomy.codes} codes of {roomy.request.max_new_tokens}")
+    check("truncated audio really is shorter", tiny.duration < roomy.duration,
+          f"{tiny.duration:.2f}s vs {roomy.duration:.2f}s")
+    check("default matches the checkpoint's own generate_config",
+          roomy.request.max_new_tokens == int(
+              loaded.model.generate_config.get("max_new_tokens", 0)),
+          str(roomy.request.max_new_tokens))
+
+    # ---- sub-talker parameters reach the model ----
+    fixed = dict(text=sentence, instruct=design, language="English", seed=606)
+    a = engine.synthesize(SynthRequest(**fixed, subtalker_temperature=0.9))
+    b = engine.synthesize(SynthRequest(**fixed, subtalker_temperature=0.9))
+    c = engine.synthesize(SynthRequest(**fixed, subtalker_temperature=0.2))
+    d = engine.synthesize(SynthRequest(**fixed, subtalker_do_sample=False))
+    check("identical sub-talker settings are reproducible",
+          a.waveform.shape == b.waveform.shape
+          and np.allclose(a.waveform, b.waveform, atol=1e-5))
+    check("sub-talker temperature changes the output",
+          not (a.waveform.shape == c.waveform.shape
+               and np.allclose(a.waveform, c.waveform, atol=1e-5)))
+    check("greedy sub-talker changes the output",
+          not (a.waveform.shape == d.waveform.shape
+               and np.allclose(a.waveform, d.waveform, atol=1e-5)))
+
+    # ---- take history round-trips the new fields ----
+    from voicestudio.core.history import Take, TakeHistory  # noqa: E402
+
+    hist = TakeHistory.load()
+    wav_path = hist.next_wav_path()
+    audio_utils.write_wav(wav_path, c.waveform, c.sample_rate)
+    probe_take = hist.add(Take(
+        instruct=design, text=sentence, language="English", seed=606,
+        wav_path=str(wav_path), sample_rate=c.sample_rate, duration=c.duration,
+        elapsed=c.elapsed, subtalker_temperature=0.2, subtalker_top_k=7,
+        subtalker_do_sample=False, truncated=True, spoken_text="normalized text",
+    ))
+    reloaded = TakeHistory.load().get(probe_take.id)
+    check("sub-talker settings survive history save/load",
+          reloaded.subtalker_temperature == 0.2 and reloaded.subtalker_top_k == 7
+          and reloaded.subtalker_do_sample is False)
+    check("truncation flag and spoken text persist",
+          reloaded.truncated and reloaded.spoken_text == "normalized text")
+    hist.remove(probe_take.id)
+    check("probe take cleaned up", TakeHistory.load().get(probe_take.id) is None)
+
     # ---- cancellation ----
     from voicestudio.ui.workers import SCRIPT, EngineHost, SynthJob
 

@@ -27,7 +27,14 @@ class Take:
     top_p: float = 1.0
     top_k: int = 50
     repetition_penalty: float = 1.05
-    max_new_tokens: int = 4096
+    max_new_tokens: int = 8192
+    subtalker_do_sample: bool = True
+    subtalker_temperature: float = 0.9
+    subtalker_top_p: float = 1.0
+    subtalker_top_k: int = 50
+    truncated: bool = False
+    # What was actually spoken, after pronunciation rules and normalization.
+    spoken_text: str = ""
     starred: bool = False
     label: str = ""
     created: float = field(default_factory=time.time)

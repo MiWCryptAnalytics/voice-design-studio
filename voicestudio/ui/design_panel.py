@@ -94,6 +94,7 @@ class DesignPanel(QFrame):
     instructChanged = pyqtSignal(str)
     auditionRequested = pyqtSignal(str, str)  # instruct, display name
     seedApplied = pyqtSignal(int)  # a loaded preset pinned this seed
+    libraryChanged = pyqtSignal()  # a voice was saved, deleted or renamed
 
     def __init__(self, library: VoiceLibrary, parent: QWidget | None = None):
         super().__init__(parent)
@@ -444,6 +445,7 @@ class DesignPanel(QFrame):
         )
         self.library.add(preset)
         self.refresh_library()
+        self.libraryChanged.emit()
 
     def _load_selected_preset(self) -> None:
         preset_id = self._selected_preset_id()
@@ -465,6 +467,7 @@ class DesignPanel(QFrame):
         if preset_id:
             self.library.toggle_favorite(preset_id)
             self.refresh_library()
+            self.libraryChanged.emit()
 
     def _delete_selected(self) -> None:
         preset_id = self._selected_preset_id()
@@ -481,3 +484,4 @@ class DesignPanel(QFrame):
         if confirm == QMessageBox.StandardButton.Yes:
             self.library.remove(preset.id)
             self.refresh_library()
+            self.libraryChanged.emit()

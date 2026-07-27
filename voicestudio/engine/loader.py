@@ -23,6 +23,23 @@ from qwen_tts.core.models import (
 
 MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 
+# Everything the model and processor need. Checked before choosing offline, so a
+# partially-downloaded cache doesn't turn into a confusing load failure.
+REQUIRED_FILES = (
+    "config.json",
+    "generation_config.json",
+    "preprocessor_config.json",
+    "tokenizer_config.json",
+    "vocab.json",
+    "merges.txt",
+    "model.safetensors",
+    "speech_tokenizer/config.json",
+    "speech_tokenizer/model.safetensors",
+)
+
+# Set to 1 to force local-only loading and fail loudly instead of reaching out.
+OFFLINE_ENV = "VOICESTUDIO_OFFLINE"
+
 # Fallback list; the loaded model is authoritative via get_supported_languages().
 FALLBACK_LANGUAGES = [
     "Auto", "Chinese", "English", "Japanese", "Korean", "German",
@@ -62,6 +79,7 @@ class LoadedModel:
     dtype: torch.dtype
     sample_rate: int
     languages: list[str] = field(default_factory=list)
+    offline: bool = False
 
     @property
     def device_label(self) -> str:
@@ -75,8 +93,15 @@ def load_model(
     model_id: str = MODEL_ID,
     device: str | None = None,
     progress: Callable[[str], None] | None = None,
+    local_files_only: bool | None = None,
 ) -> LoadedModel:
-    """Load model + processor. `progress` receives human-readable status strings."""
+    """Load model + processor. `progress` receives human-readable status strings.
+
+    When the model is fully cached the load runs entirely offline. Without this,
+    every launch contacts the Hub — the model's own `from_pretrained` fetches the
+    speech tokenizer and the processor revalidates against the API — so the app
+    needs a working connection even though nothing has to be downloaded.
+    """
 
     def say(msg: str) -> None:
         if progress:
@@ -88,20 +113,66 @@ def load_model(
     device = device or pick_device()
     dtype = pick_dtype(device)
 
-    say(f"Loading weights onto {device} ({str(dtype).replace('torch.', '')})…")
-    model = AutoModel.from_pretrained(
-        model_id,
-        dtype=dtype,
-        device_map=device,
-        # sdpa avoids the flash-attn build; negligible cost at 1.7B.
-        attn_implementation="sdpa",
-    )
+    forced = forced_offline()
+    local_path: str | None = None
+    if local_files_only is None:
+        missing = missing_from_cache(model_id)
+        if missing and forced:
+            raise RuntimeError(
+                f"{OFFLINE_ENV} is set but the cache is incomplete. Missing: "
+                + ", ".join(missing)
+            )
+        if missing:
+            say(f"Downloading {len(missing)} missing file(s) from the Hub…")
+        local_files_only = not missing
+
+    if local_files_only:
+        local_path = resolve_local_path(model_id)
+        if local_path is None:
+            if forced:
+                raise RuntimeError(
+                    f"{OFFLINE_ENV} is set but no cached snapshot was found for "
+                    f"{model_id}."
+                )
+            local_files_only = False
+
+    def build(offline: bool):
+        # A local directory is what keeps the load off the network entirely.
+        source = local_path if (offline and local_path) else model_id
+        say(
+            f"Loading weights onto {device} "
+            f"({str(dtype).replace('torch.', '')})"
+            + (" from local cache…" if offline else "…")
+        )
+        loaded_model = AutoModel.from_pretrained(
+            source,
+            dtype=dtype,
+            device_map=device,
+            # sdpa avoids the flash-attn build; negligible cost at 1.7B.
+            attn_implementation="sdpa",
+            local_files_only=offline,
+        )
+        say("Loading processor…")
+        loaded_processor = AutoProcessor.from_pretrained(
+            source, fix_mistral_regex=True, local_files_only=offline
+        )
+        return loaded_model, loaded_processor
+
+    loaded_offline = local_files_only
+    try:
+        model, processor = build(local_files_only)
+    except Exception:
+        # A cache can look complete and still be unusable (a truncated blob, a
+        # revision mismatch). Fall back to the network unless told not to.
+        if not local_files_only or forced:
+            raise
+        say("Local cache incomplete — retrying with the Hub…")
+        model, processor = build(False)
+        loaded_offline = False
+
     if not isinstance(model, Qwen3TTSForConditionalGeneration):
         raise TypeError(f"Expected Qwen3TTSForConditionalGeneration, got {type(model)}")
     model.eval()
-
-    say("Loading processor…")
-    processor = AutoProcessor.from_pretrained(model_id, fix_mistral_regex=True)
 
     sample_rate = _resolve_sample_rate(model)
 
@@ -114,7 +185,7 @@ def load_model(
     except Exception:
         pass
 
-    say("Ready.")
+    say("Ready (loaded from local cache)." if loaded_offline else "Ready.")
     return LoadedModel(
         model=model,
         processor=processor,
@@ -122,6 +193,7 @@ def load_model(
         dtype=dtype,
         sample_rate=sample_rate,
         languages=languages,
+        offline=loaded_offline,
     )
 
 
@@ -142,9 +214,47 @@ def _resolve_sample_rate(model) -> int:
     return 24000
 
 
-def is_model_cached(model_id: str = MODEL_ID) -> bool:
-    """True if weights are already in the HF cache (so load won't hit the network)."""
+def missing_from_cache(model_id: str = MODEL_ID) -> list[str]:
+    """Which required files are not in the local HF cache."""
     from huggingface_hub import try_to_load_from_cache
 
-    hit = try_to_load_from_cache(model_id, "config.json")
-    return isinstance(hit, str) and os.path.isfile(hit)
+    missing = []
+    for name in REQUIRED_FILES:
+        try:
+            hit = try_to_load_from_cache(model_id, name)
+        except Exception:
+            hit = None
+        if not (isinstance(hit, str) and os.path.isfile(hit)):
+            missing.append(name)
+    return missing
+
+
+def is_model_cached(model_id: str = MODEL_ID) -> bool:
+    """True when the whole model is cached, so loading needs no network at all."""
+    return not missing_from_cache(model_id)
+
+
+def forced_offline() -> bool:
+    return os.environ.get(OFFLINE_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+def resolve_local_path(model_id: str = MODEL_ID) -> str | None:
+    """The cached snapshot directory, or None if it isn't fully cached.
+
+    Loading from a *path* rather than a repo id is what actually makes the load
+    offline. Two places reach for the network even with `local_files_only=True`,
+    and both are short-circuited by a local directory:
+
+    * the tokenizer's Mistral-regex patch calls `model_info()` unconditionally,
+      but only when `_is_local` is False;
+    * the model's own `from_pretrained` fetches `speech_tokenizer/*` unless the
+      path is already a directory.
+    """
+    if os.path.isdir(model_id):
+        return model_id
+    try:
+        from huggingface_hub import snapshot_download
+
+        return snapshot_download(model_id, local_files_only=True)
+    except Exception:
+        return None

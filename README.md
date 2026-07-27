@@ -25,6 +25,84 @@ reported by the model), and sampling controls. Long scripts split on sentence
 boundaries and generate chunk-by-chunk under one seed, then join into a single take.
 The waveform is click-to-seek.
 
+A collapsible **Sub-talker** section exposes the model's second sampling stage,
+which predicts the residual codebooks carrying acoustic detail. It's linked to the
+main controls by default, matching the checkpoint's own behaviour. Measurement
+([subtalker_sweep.py](scripts/subtalker_sweep.py)) found these settings change the
+rendition substantially but with no consistent direction across 0.2–1.5 — treat it
+as a second exploration axis, not a quality dial. **Max tokens** is a ceiling on
+codec frames (~12 per second of audio); a take that hits it is cut off mid-word and
+is now flagged as truncated instead of passing for a short take.
+
+**Multi-voice dialogue.** Write a screenplay-style script and each character gets
+its own voice:
+
+```
+NARRATOR: The door opened.
+VILLAIN: You're late.
+  And I don't like waiting.
+[pause 1.5]
+NARRATOR: Nobody answered.
+```
+
+Speaker labels are detected automatically, a **Cast** table appears, and you map
+each speaker to a voice. The list is grouped — **My voices** (everything in your
+library, favourites starred and seed-pinned entries marked 📌) above the built-in
+**Templates** — and it updates the moment you save a new voice, so you can design a
+character and cast it without reloading. Indented lines continue the previous
+speaker; `[pause N]` inserts silence; a longer beat is left automatically when the
+speaker changes. Generation refuses up front if any speaker is unassigned rather
+than failing halfway through, and deleting a voice that was cast unassigns that
+speaker rather than silently substituting a different one. **Tools → Export dialogue
+stems** writes one WAV per line plus a `cue_sheet.tsv` of line timings for a video or
+game editor.
+
+### Keeping a voice steady
+
+A description keeps a character broadly recognisable, but it does not pin the
+voice — generate the same description twice and you get two slightly different
+readings. Across a scene that drift is audible, and it's the main thing that makes
+multi-voice output sound wrong.
+
+This checkpoint offers no speaker-locking mechanism to fix it directly. ICL and
+voice cloning both need a speaker embedding, and `extract_speaker_embedding` fails
+here because the VoiceDesign checkpoint ships no speaker encoder — those paths
+belong to the **VoiceClone** and **CustomVoice** checkpoints.
+
+What does work: a voice is genuinely fixed *inside a single generation*, because the
+audio is one continuous sample. So **Keep each voice steady across its lines** (on by
+default) renders all of a speaker's lines in one pass and splits them apart on the
+silences between sentences. Measured over an interleaved two-hander
+([voice_lock_study.py](scripts/voice_lock_study.py)):
+
+| strategy | drift | drift ÷ character separation |
+|---|---|---|
+| per-line generation | 0.0745 | 0.20 |
+| voice-locked | 0.0511 | 0.14 |
+
+**31% less drift**, consistent across runs. If a split can't be made safely — the
+silences aren't clear, or the segment lengths contradict what the text predicts —
+that group falls back to line-by-line rather than shipping mis-cut audio, and the
+take is labelled to say so.
+
+Two practical consequences. Cast characters whose descriptions differ in *pitch or
+age*, not just wording: two similar older men sit about 0.07 apart, barely above the
+measurement floor, while a documentary narrator and a children's presenter sit 0.37
+apart and never get confused. And turning the toggle off is worth it if you want each
+line auditioned independently — it just costs consistency.
+
+**Pronunciation (Ctrl+P).** A separate window with two halves. The **dictionary**
+holds respellings — `Qwen` → `Chwen` — with whole-word, case, regex and
+per-language options; rules run in list order and can be reordered. Since the model
+takes no phoneme input, respelling is the only lever, and the window says so.
+**Tuning** generates your test phrase with and without the selected rule and pins
+them as A and B, so fixing a pronunciation uses the same compare loop as designing
+a voice. The **normalization** half toggles automatic written-to-spoken rewrites:
+numbers, ordinals, currency, dates, times, units, initialisms, symbols and
+whitespace. Order is fixed — normalize first, your rules last — so a hand-written
+rule always wins. A live preview shows the original beside what will actually be
+spoken, with per-rule hit counts so dead rules are visible.
+
 **Takes (right).** Every generation becomes a card with its seed and parameters.
 Star the good ones, **re-roll** with a new seed, **restore** a take's settings back
 into the editor, or export the WAV. Pin any two takes as **A** and **B** and toggle
@@ -61,8 +139,27 @@ python3 -m venv .venv
 ./run.sh
 ```
 
-The first launch downloads ~4.5 GB from the Hugging Face Hub. Subsequent launches
-load from cache in a few seconds.
+The first launch downloads ~4.5 GB from the Hugging Face Hub. **After that the app
+needs no internet at all** — once every required file is cached it loads from the
+local snapshot directory in about a second, and the status bar shows `cached`.
+
+That is deliberate rather than automatic. Two things in the stack contact the Hub
+even when nothing needs downloading, and both ignore `local_files_only`:
+
+- the tokenizer's Mistral-regex patch calls `model_info()` unconditionally — but
+  only when the path isn't local;
+- the model's own `from_pretrained` fetches `speech_tokenizer/*` unless the path is
+  already a directory.
+
+So [loader.py](voicestudio/engine/loader.py) resolves the cached snapshot to a
+**directory path** and loads from that, which short-circuits both. If the cache is
+incomplete it downloads the missing files as usual, and if a load from cache fails
+(a truncated blob, say) it retries against the Hub rather than dying.
+
+Set `VOICESTUDIO_OFFLINE=1` to forbid network access outright — the app then fails
+with a clear message listing missing files instead of quietly reaching out.
+[offline_check.py](scripts/offline_check.py) verifies all of this with the network
+blackholed.
 
 Keyboard: `Ctrl+Enter` generate · `Space` play/pause · `Ctrl+S` save voice ·
 `Ctrl+1`/`Ctrl+2` play A/B · `Esc` cancel.
@@ -125,10 +222,17 @@ transformers.
 voicestudio/
 ├── engine/    loader.py (registration + load)  synth.py (prompt, generate, decode)
 ├── core/      config  library  history  audio  script  templates  traits
+│              normalize (written → spoken)  pronounce (rules)  dialogue (parser)
 ├── assets/    templates.json — the 20 built-in voice descriptions
-└── ui/        main_window  design_panel  script_panel  params_panel
-               takes_panel  player  workers (QThread model host)  theme
+└── ui/        main_window  design_panel  script_panel  params_panel  cast_panel
+               takes_panel  pronounce_window  player  metrics  theme
+               workers (QThread model host)
 ```
+
+A job is a list of items plus a mode saying how their audio combines: one take
+(`single`), one joined take (`script`, `dialogue`), or a take per item
+(`variations`, `compare`). Dialogue and pronunciation A/B are both that same
+machinery, which is why neither needed its own generation path.
 
 Model load and generation run on a worker `QThread`; the UI thread only ever receives
 signals, so the window stays responsive during the cold load and every generation.
@@ -140,16 +244,34 @@ Presets, take history, and session state persist under
 ## Tests
 
 ```bash
-.venv/bin/python scripts/smoke_test.py                               # engine only
-.venv/bin/python scripts/final_checks.py                             # presets, cancel, VRAM
-QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/gui_smoke.py      # full app, headless
+.venv/bin/python scripts/unit_tests.py                               # pure logic, no model
 QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/hidpi_check.py    # scaling, no model
+.venv/bin/python scripts/smoke_test.py                               # engine only
+.venv/bin/python scripts/final_checks.py                             # engine behaviour
+.venv/bin/python scripts/offline_check.py                            # loads with no network
+QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/gui_smoke.py      # full app, headless
 ```
 
-`smoke_test.py` checks that audio is non-silent and that a fixed seed reproduces
-identical output. `final_checks.py` covers preset forking, persistence,
-cancellation, and VRAM stability across repeated generations, and confirms the
-built-in templates actually produce distinct voices. `gui_smoke.py` drives the real
-window: load, generate, variations with distinct seeds, A/B pinning, parameter
-restore, and script chunking. `hidpi_check.py` rebuilds the panels at 9/12/16/22pt
-and asserts nothing clips and that spacing scales with the font.
+The first two need no model and finish in seconds. `unit_tests.py` covers number and
+date spelling, every normalization step, rule ordering and overrides, invalid regex
+handling, and dialogue parsing including the cases that must *not* parse as cues
+("He said this: it was over."). `hidpi_check.py` rebuilds every panel plus the
+pronunciation window at 9/12/16/22pt and asserts nothing clips.
+
+`smoke_test.py` checks audio is non-silent and that a fixed seed reproduces
+identical output. `final_checks.py` covers preset forking and seed pinning,
+truncation detection, sub-talker parameters reaching the model, history round-trips,
+cancellation, and VRAM stability. `gui_smoke.py` drives the real window end to end,
+including dialogue generation with a cast and the pronunciation pipeline.
+
+Four studies document model behaviour rather than testing code:
+[seed_study.py](scripts/seed_study.py) (what carries the voice),
+[subtalker_sweep.py](scripts/subtalker_sweep.py) (what the detail stage does),
+[consistency_study.py](scripts/consistency_study.py) (whether sampling settings
+steady a voice — they don't), and
+[voice_lock_study.py](scripts/voice_lock_study.py) (what does).
+
+A caution on all four: the identity metric is a long-term-average-spectrum
+distance, and chopping audio into windows alone produces ≈0.07 of apparent
+difference. Treat anything below that as noise. It resolves the effects reported
+here — character separation is ≈0.37 — but it is not speaker verification.

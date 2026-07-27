@@ -94,6 +94,15 @@ QComboBox, QSpinBox, QDoubleSpinBox {{
     min-height: {field_h}px;
 }}
 QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border: 1px solid {ACCENT}; }}
+/* Disabled inputs must read as disabled — e.g. sub-talker fields while linked. */
+QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled,
+QLineEdit:disabled, QPlainTextEdit:disabled {{
+    color: {TEXT_DIM};
+    background: {PANEL};
+    border-color: {PANEL_ALT};
+}}
+QCheckBox:disabled {{ color: {TEXT_DIM}; }}
+QLabel:disabled {{ color: {TEXT_DIM}; }}
 QComboBox::drop-down {{ border: none; width: {m.sp(0.9)}px; }}
 QComboBox QAbstractItemView {{
     background: {PANEL_ALT};

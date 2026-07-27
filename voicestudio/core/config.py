@@ -40,11 +40,18 @@ class Settings:
     top_p: float = 1.0
     top_k: int = 50
     repetition_penalty: float = 1.05
-    max_new_tokens: int = 4096
+    max_new_tokens: int = 8192
+    subtalker_linked: bool = True
+    subtalker_do_sample: bool = True
+    subtalker_temperature: float = 0.9
+    subtalker_top_p: float = 1.0
+    subtalker_top_k: int = 50
     seed: int = 0
     seed_locked: bool = False
     variations: int = 4
     split_long_script: bool = True
+    cast: dict = field(default_factory=dict)  # speaker -> voice key
+    lock_voices: bool = True
     window_geometry: list[int] = field(default_factory=list)
 
     @classmethod

@@ -22,18 +22,32 @@ from PyQt6.QtWidgets import (
 
 from .. import APP_NAME
 from ..core import audio as audio_utils
+from ..core import dialogue as dialogue_mod
 from ..core.config import EXPORTS_DIR, Settings, ensure_dirs
 from ..core.history import Take, TakeHistory
 from ..core.library import VoiceLibrary
+from ..core.pronounce import PronunciationBook, SpokenText
 from ..core.templates import load_templates
 from ..engine import SynthRequest, new_seed
+from .cast_panel import CastPanel
 from .design_panel import DesignPanel
 from .metrics import metrics
 from .params_panel import ParamsPanel
 from .player import PlayerBar
+from .pronounce_window import PronunciationWindow
 from .script_panel import ScriptPanel
 from .takes_panel import TakesPanel
-from .workers import SCRIPT, SINGLE, VARIATIONS, EngineHost, SynthJob, TakeAudio
+from .workers import (
+    COMPARE,
+    DIALOGUE,
+    SCRIPT,
+    SINGLE,
+    VARIATIONS,
+    EngineHost,
+    JobItem,
+    SynthJob,
+    TakeAudio,
+)
 
 
 class MainWindow(QMainWindow):
@@ -48,10 +62,15 @@ class MainWindow(QMainWindow):
         self.library = VoiceLibrary.load()
         self.history = TakeHistory.load()
         self.templates = load_templates()
+        self.book = PronunciationBook.load()
 
         self._busy = False
         self._autoplay_next = False
         self._pending_takes = 0
+        self.pronounce_window: PronunciationWindow | None = None
+        # When set, the next two takes get pinned into the A/B slots.
+        self._ab_capture: list[str] | None = None
+        self._last_segments: tuple | None = None
 
         self.setWindowTitle(APP_NAME)
         self.resize(*self._default_size())
@@ -77,11 +96,19 @@ class MainWindow(QMainWindow):
         self.design_panel = DesignPanel(self.library)
         self.design_panel.auditionRequested.connect(self._audition)
         self.design_panel.seedApplied.connect(self._apply_pinned_seed)
+        # Saving or deleting a voice must show up in the cast immediately.
+        self.design_panel.libraryChanged.connect(self._on_library_changed)
 
         self.script_panel = ScriptPanel()
         self.script_panel.generateRequested.connect(self.generate_one)
         self.script_panel.variationsRequested.connect(self.generate_variations)
         self.script_panel.cancelRequested.connect(self._cancel_job)
+        self.script_panel.dialogueDetected.connect(self._on_dialogue_detected)
+
+        self.cast_panel = CastPanel(self.library)
+        self.cast_panel.auditionRequested.connect(self._audition)
+        self.cast_panel.castChanged.connect(self._on_cast_changed)
+        self.cast_panel.setVisible(False)
 
         self.params_panel = ParamsPanel()
         # Saving a voice needs the seed that produced what you last heard.
@@ -105,6 +132,7 @@ class MainWindow(QMainWindow):
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(m.sp(0.6))
         center_layout.addWidget(self.script_panel, 3)
+        center_layout.addWidget(self.cast_panel, 0)
         center_layout.addWidget(self.params_panel, 0)
         center_layout.addWidget(player_frame, 0)
 
@@ -132,7 +160,19 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(splitter)
         self.setCentralWidget(root)
 
+        self._build_menu()
         self._build_status_bar()
+
+    def _build_menu(self) -> None:
+        tools = self.menuBar().addMenu("&Tools")
+        action = tools.addAction("&Pronunciation…")
+        action.setShortcut(QKeySequence("Ctrl+P"))
+        action.triggered.connect(self.open_pronunciation)
+
+        tools.addSeparator()
+        stems = tools.addAction("Export dialogue &stems…")
+        stems.setToolTip("Write one WAV per line plus a cue sheet")
+        stems.triggered.connect(self._export_stems_of_latest)
 
     def _build_status_bar(self) -> None:
         bar = self.statusBar()
@@ -214,8 +254,18 @@ class MainWindow(QMainWindow):
         self.script_panel.set_languages(loaded.languages)
         if self.settings.language in loaded.languages:
             self.script_panel.language_combo.setCurrentText(self.settings.language)
-        self.status_label.setText("Ready")
-        self.device_label.setText(f"{loaded.device_label} · {loaded.sample_rate} Hz")
+        self.status_label.setText(
+            "Ready · loaded from local cache" if loaded.offline else "Ready"
+        )
+        source = "cached" if loaded.offline else "hub"
+        self.device_label.setText(
+            f"{loaded.device_label} · {loaded.sample_rate} Hz · {source}"
+        )
+        self.device_label.setToolTip(
+            "Model loaded from the local cache — no network needed."
+            if loaded.offline
+            else "Model was fetched from the Hugging Face Hub this launch."
+        )
         self.script_panel.set_busy(False)
 
     def _on_load_failed(self, message: str) -> None:
@@ -228,10 +278,14 @@ class MainWindow(QMainWindow):
 
     # ---------- generating ----------
 
+    def spoken(self, text: str) -> SpokenText:
+        """What will actually be spoken, after normalization and rules."""
+        return self.book.apply(text, self.script_panel.language)
+
     def _build_request(self, text: str, seed: int) -> SynthRequest:
         params = self.params_panel.values()
         return SynthRequest(
-            text=text,
+            text=self.spoken(text).text,
             instruct=self.design_panel.instruct,
             language=self.script_panel.language,
             seed=seed,
@@ -250,15 +304,64 @@ class MainWindow(QMainWindow):
         self.jobRequested.emit(job)
 
     def generate_one(self) -> None:
+        if self.script_panel.dialogue_script() is not None:
+            self.generate_dialogue()
+            return
+
         chunks = self.script_panel.chunks()
         if not chunks:
             self.status_label.setText("Write something for the voice to say.")
             return
         seed = self.params_panel.effective_seed()
         request = self._build_request(chunks[0], seed)
+        items = [JobItem(text=self.spoken(c).text) for c in chunks]
         mode = SCRIPT if len(chunks) > 1 else SINGLE
         self._submit(
-            SynthJob(request=request, chunks=chunks, seeds=[seed], mode=mode),
+            SynthJob(request=request, items=items, seeds=[seed], mode=mode),
+            autoplay=True,
+        )
+
+    def generate_dialogue(self) -> None:
+        script = self.script_panel.dialogue_script()
+        if script is None or not script.lines:
+            self.status_label.setText("Nothing to generate.")
+            return
+
+        missing = self.cast_panel.unassigned()
+        if missing:
+            # Refuse before generating, not halfway through a long script. Reported
+            # inline rather than in a modal — the cast table already shows which
+            # speakers are unassigned, and a dialog here would just be in the way.
+            self.status_label.setText(
+                "Assign a voice to every speaker first — unassigned: "
+                + ", ".join(missing)
+            )
+            self.cast_panel.setFocus()
+            return
+
+        cast = self.cast_panel.cast
+        fallback = self.design_panel.instruct
+        seed = self.params_panel.effective_seed()
+
+        items = [
+            JobItem(
+                text=self.spoken(line.text).text,
+                instruct=self.cast_panel.instruct_for(cast.get(line.speaker, ""),
+                                                      fallback),
+                speaker=line.speaker,
+                pause_after=line.pause_after,
+            )
+            for line in script.lines
+        ]
+        request = self._build_request(script.lines[0].text, seed)
+        self._submit(
+            SynthJob(
+                request=request,
+                items=items,
+                seeds=[seed],
+                mode=DIALOGUE,
+                lock_voices=self.cast_panel.lock_voices.isChecked(),
+            ),
             autoplay=True,
         )
 
@@ -273,7 +376,7 @@ class MainWindow(QMainWindow):
         self._submit(
             SynthJob(
                 request=request,
-                chunks=[chunks[0]],
+                items=[JobItem(text=request.text)],
                 seeds=seeds,
                 mode=VARIATIONS,
             )
@@ -291,12 +394,82 @@ class MainWindow(QMainWindow):
         self._submit(
             SynthJob(
                 request=request,
-                chunks=[self.templates.demo_sentence],
+                items=[JobItem(text=self.templates.demo_sentence)],
                 seeds=[self.templates.demo_seed],
                 mode=SINGLE,
                 label=f"Audition · {name}",
             ),
             autoplay=True,
+        )
+
+    def _on_dialogue_detected(self, script) -> None:
+        """Show the cast only when the script actually uses speaker labels."""
+        is_dialogue = script is not None
+        self.cast_panel.setVisible(is_dialogue)
+        if is_dialogue:
+            self.cast_panel.set_speakers(script.speakers)
+            for issue in script.issues:
+                self.status_label.setText(f"Line {issue.line_number}: {issue.message}")
+
+    def _on_cast_changed(self) -> None:
+        self.settings.cast = self.cast_panel.cast
+
+    def _on_library_changed(self) -> None:
+        self.cast_panel.refresh_voices()
+
+    # ---------- pronunciation ----------
+
+    def open_pronunciation(self) -> None:
+        if self.pronounce_window is None:
+            self.pronounce_window = PronunciationWindow(
+                self.book,
+                languages=lambda: [
+                    self.script_panel.language_combo.itemText(i)
+                    for i in range(self.script_panel.language_combo.count())
+                ],
+                current_language=lambda: self.script_panel.language,
+                sample_text=lambda: self.script_panel.script,
+                parent=self,
+            )
+            self.pronounce_window.changed.connect(self._on_pronunciation_changed)
+            self.pronounce_window.testRequested.connect(self._test_pronunciation)
+        self.pronounce_window.reload()
+        self.pronounce_window.show()
+        self.pronounce_window.raise_()
+        self.pronounce_window.activateWindow()
+
+    def _on_pronunciation_changed(self) -> None:
+        spoken = self.spoken(self.script_panel.script)
+        if spoken.changed:
+            self.status_label.setText(
+                f"Pronunciation active · {spoken.total_rule_hits} rule matches"
+            )
+
+    def _test_pronunciation(self, rule_id: str, phrase: str) -> None:
+        """Generate the phrase with and without one rule, then pin them A/B."""
+        language = self.script_panel.language
+        with_rule = self.book.apply(phrase, language).text
+        without_rule = self.book.apply(phrase, language, skip_rule=rule_id).text
+        seed = self.params_panel.seed_spin.value() or new_seed()
+
+        request = SynthRequest(
+            text=with_rule,
+            instruct=self.design_panel.instruct,
+            language=language,
+            seed=seed,
+            **self.params_panel.values(),
+        )
+        self._ab_capture = []
+        self._submit(
+            SynthJob(
+                request=request,
+                items=[
+                    JobItem(text=with_rule, label="Pronunciation · with rule"),
+                    JobItem(text=without_rule, label="Pronunciation · without rule"),
+                ],
+                seeds=[seed],
+                mode=COMPARE,
+            )
         )
 
     def _apply_pinned_seed(self, seed: int) -> None:
@@ -344,13 +517,39 @@ class MainWindow(QMainWindow):
             top_k=request.top_k,
             repetition_penalty=request.repetition_penalty,
             max_new_tokens=request.max_new_tokens,
+            subtalker_do_sample=request.subtalker_do_sample,
+            subtalker_temperature=request.subtalker_temperature,
+            subtalker_top_p=request.subtalker_top_p,
+            subtalker_top_k=request.subtalker_top_k,
+            truncated=take_audio.truncated,
+            spoken_text=request.text,
             label=take_audio.label,
         )
         self.history.add(take)
+        # Segments live only in memory; they back stem export for the latest take.
+        if take_audio.segments:
+            self._last_segments = (take.id, take_audio.segments, take.sample_rate)
         self.takes_panel.refresh()
+
+        if self._ab_capture is not None:
+            self._ab_capture.append(take.id)
+            if len(self._ab_capture) >= 2:
+                self.takes_panel.slot_a = self._ab_capture[0]
+                self.takes_panel.slot_b = self._ab_capture[1]
+                self.takes_panel.refresh()
+                self.status_label.setText(
+                    "Pinned as A (with rule) and B (without) — Ctrl+1 / Ctrl+2"
+                )
+                self._ab_capture = None
 
         rtf = take.duration / take.elapsed if take.elapsed > 0 else 0.0
         self.perf_label.setText(f"{take.elapsed:.1f}s · {rtf:.2f}× realtime")
+        if take_audio.truncated:
+            # Otherwise a cut-off take is indistinguishable from a short one.
+            self.status_label.setText(
+                f"⚠ Take hit the {request.max_new_tokens}-frame ceiling and was cut "
+                "off — raise Max tokens or shorten the text"
+            )
 
         self.player.load(wav_path, take_audio.waveform, take.title)
         if self._autoplay_next:
@@ -401,6 +600,10 @@ class MainWindow(QMainWindow):
             top_k=take.top_k,
             repetition_penalty=take.repetition_penalty,
             max_new_tokens=take.max_new_tokens,
+            subtalker_do_sample=take.subtalker_do_sample,
+            subtalker_temperature=take.subtalker_temperature,
+            subtalker_top_p=take.subtalker_top_p,
+            subtalker_top_k=take.subtalker_top_k,
         )
         self._submit(
             SynthJob(request=request, chunks=[take.text], seeds=[seed], mode=SINGLE),
@@ -422,6 +625,10 @@ class MainWindow(QMainWindow):
                 "top_k": take.top_k,
                 "repetition_penalty": take.repetition_penalty,
                 "max_new_tokens": take.max_new_tokens,
+                "subtalker_do_sample": take.subtalker_do_sample,
+                "subtalker_temperature": take.subtalker_temperature,
+                "subtalker_top_p": take.subtalker_top_p,
+                "subtalker_top_k": take.subtalker_top_k,
             }
         )
         self.params_panel.show_seed(take.seed)
@@ -443,6 +650,46 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, "Export failed", str(exc))
 
+    def _export_stems_of_latest(self) -> None:
+        """One WAV per dialogue line, plus a cue sheet of line timings."""
+        if not self._last_segments:
+            QMessageBox.information(
+                self,
+                "No dialogue to export",
+                "Generate a dialogue script first — stems come from its lines.",
+            )
+            return
+
+        take_id, segments, sample_rate = self._last_segments
+        directory = QFileDialog.getExistingDirectory(
+            self, "Choose a folder for stems", str(EXPORTS_DIR)
+        )
+        if not directory:
+            return
+
+        target = Path(directory)
+        try:
+            for index, segment in enumerate(segments, start=1):
+                name = f"{index:04d}_{_safe_name(segment.speaker or 'line')}.wav"
+                audio_utils.write_wav(target / name, segment.waveform, sample_rate)
+
+            cue = dialogue_mod.format_cue_sheet(
+                [
+                    dialogue_mod.DialogueLine(speaker=s.speaker, text=s.text)
+                    for s in segments
+                ],
+                [s.duration for s in segments],
+                [s.gap_after for s in segments],
+            )
+            (target / "cue_sheet.tsv").write_text(cue)
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+
+        self.status_label.setText(
+            f"Exported {len(segments)} stems and a cue sheet to {target.name}"
+        )
+
     # ---------- settings ----------
 
     def _update_vram(self) -> None:
@@ -463,16 +710,27 @@ class MainWindow(QMainWindow):
         self.script_panel.text_edit.setPlainText(s.script)
         self.script_panel.split_check.setChecked(s.split_long_script)
         self.script_panel.variations_spin.setValue(max(2, min(8, s.variations)))
-        self.params_panel.apply(
-            {
-                "temperature": s.temperature,
-                "top_p": s.top_p,
-                "top_k": s.top_k,
-                "repetition_penalty": s.repetition_penalty,
-                "max_new_tokens": s.max_new_tokens,
-            }
-        )
+        self.params_panel.set_linked(s.subtalker_linked)
+        restored = {
+            "temperature": s.temperature,
+            "top_p": s.top_p,
+            "top_k": s.top_k,
+            "repetition_penalty": s.repetition_penalty,
+            "max_new_tokens": s.max_new_tokens,
+        }
+        if not s.subtalker_linked:
+            restored.update(
+                {
+                    "subtalker_do_sample": s.subtalker_do_sample,
+                    "subtalker_temperature": s.subtalker_temperature,
+                    "subtalker_top_p": s.subtalker_top_p,
+                    "subtalker_top_k": s.subtalker_top_k,
+                }
+            )
+        self.params_panel.apply(restored)
         self.params_panel.seed_lock.setChecked(s.seed_locked)
+        self.cast_panel.set_cast(s.cast)
+        self.cast_panel.lock_voices.setChecked(s.lock_voices)
         if s.seed:
             self.params_panel.show_seed(s.seed)
         if len(s.window_geometry) == 4:
@@ -487,6 +745,9 @@ class MainWindow(QMainWindow):
         s.variations = self.script_panel.variations_spin.value()
         s.seed = self.params_panel.seed_spin.value()
         s.seed_locked = self.params_panel.seed_locked
+        s.subtalker_linked = self.params_panel.subtalker_link.isChecked()
+        s.cast = self.cast_panel.cast
+        s.lock_voices = self.cast_panel.lock_voices.isChecked()
         s.__dict__.update(self.params_panel.values())
         geo = self.geometry()
         s.window_geometry = [geo.x(), geo.y(), geo.width(), geo.height()]
@@ -494,6 +755,9 @@ class MainWindow(QMainWindow):
             s.save()
         except OSError:
             pass
+
+        if self.pronounce_window is not None:
+            self.pronounce_window.close()
 
         self.host.cancel()
         self.thread.quit()

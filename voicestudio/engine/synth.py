@@ -30,7 +30,15 @@ class SynthRequest:
     top_p: float = 1.0
     top_k: int = 50
     repetition_penalty: float = 1.05
-    max_new_tokens: int = 4096
+    # Matches the checkpoint's own generate_config. At ~12 codec frames per
+    # second of audio this is far above any realistic chunk.
+    max_new_tokens: int = 8192
+    # Second sampling stage: predicts the residual codebooks (acoustic detail)
+    # on top of the talker's stream. Defaults mirror the checkpoint.
+    subtalker_do_sample: bool = True
+    subtalker_temperature: float = 0.9
+    subtalker_top_p: float = 1.0
+    subtalker_top_k: int = 50
 
     def with_seed(self, seed: int) -> "SynthRequest":
         return replace(self, seed=seed)
@@ -43,6 +51,8 @@ class SynthResult:
     seed: int
     elapsed: float
     request: SynthRequest
+    codes: int = 0
+    truncated: bool = False
     meta: dict = field(default_factory=dict)
 
     @property
@@ -131,6 +141,10 @@ class SynthEngine:
             top_k=req.top_k,
             repetition_penalty=req.repetition_penalty,
             max_new_tokens=req.max_new_tokens,
+            subtalker_dosample=req.subtalker_do_sample,
+            subtalker_temperature=req.subtalker_temperature,
+            subtalker_top_p=req.subtalker_top_p,
+            subtalker_top_k=req.subtalker_top_k,
         )
         wavs, fs = model.speech_tokenizer.decode(
             [{"audio_codes": c} for c in codes_list]
@@ -138,7 +152,8 @@ class SynthEngine:
         elapsed = time.perf_counter() - started
 
         out: list[SynthResult] = []
-        for text, wav in zip(texts, wavs):
+        for text, wav, codes in zip(texts, wavs, codes_list):
+            n_codes = int(codes.shape[0])
             out.append(
                 SynthResult(
                     waveform=_to_mono_float32(wav),
@@ -147,9 +162,22 @@ class SynthEngine:
                     # Attribute the batch cost evenly across chunks.
                     elapsed=elapsed / len(texts),
                     request=replace(req, text=text, seed=seed),
+                    codes=n_codes,
+                    truncated=_hit_token_cap(n_codes, req.max_new_tokens),
                 )
             )
         return out
+
+
+def _hit_token_cap(n_codes: int, max_new_tokens: int) -> bool:
+    """True when generation stopped at the budget instead of at an end token.
+
+    A run that ends naturally emits an EOS and returns well short of the cap;
+    a truncated one returns `max_new_tokens - 1` codes (the final step produces
+    no hidden state). Without this the audio just stops mid-word and the take
+    looks like an ordinary short one.
+    """
+    return n_codes >= max_new_tokens - 1
 
 
 def _to_mono_float32(wav) -> np.ndarray:

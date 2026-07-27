@@ -57,19 +57,40 @@ def main() -> int:
     wait_for(window.host.loadReady, 180_000)
     settle(app)
 
-    template = window.templates.get("noir-detective")
-    window.design_panel._apply_traits(template.traits)
-    window.design_panel.set_instruct(template.instruct, detached=False)
+    templates = window.templates
+    noir = templates.get("noir-detective")
+    window.design_panel._apply_traits(noir.traits)
+    window.design_panel.set_instruct(noir.instruct, detached=False)
     window.design_panel.template_search.setText("noir")
     window.script_panel.language_combo.setCurrentText("English")
+
+    # A dialogue script, so the cast table is on screen.
     window.script_panel.text_edit.setPlainText(
-        "She walked in like a rumor that turned out to be true. "
-        "I had two questions and neither one was polite."
+        "NARRATOR: She walked in like a rumor that turned out to be true.\n"
+        "DETECTIVE: I had two questions and neither one was polite.\n"
+        "[pause 1.0]\n"
+        "NARRATOR: Nobody answered.\n"
     )
     settle(app)
 
-    window.generate_one()
-    wait_for(window.host.jobDone, 300_000)
+    # A saved voice, so the cast shows a custom entry beside the templates.
+    from voicestudio.core.library import VoicePreset
+
+    saved = window.library.add(VoicePreset(
+        name="Rain-Slick Detective", instruct=noir.instruct,
+        traits=dict(noir.traits), seed=4242, favorite=True,
+    ))
+    window.design_panel.refresh_library()
+    window.cast_panel.set_cast({
+        "NARRATOR": f"template:{templates.get('nature-documentary').id}",
+        "DETECTIVE": f"preset:{saved.id}",
+    })
+    window.cast_panel.set_speakers(["NARRATOR", "DETECTIVE"])
+    window.params_panel.subtalker_toggle.setChecked(True)
+    settle(app)
+
+    window.generate_dialogue()
+    wait_for(window.host.jobDone, 600_000)
     settle(app, 800)
 
     takes = window.history.all()
@@ -86,8 +107,39 @@ def main() -> int:
     ok = window.grab().save(str(out))
     print(f"{'saved' if ok else 'FAILED to save'} {out}")
 
+    # Second shot: the pronunciation window.
+    from voicestudio.core.pronounce import PronunciationRule
+
+    existing = {r.match for r in window.book.all()}
+    added = []
+    for match, replacement, note in [
+        ("Qwen", "Chwen", "model name"),
+        ("Caius", "Kye-us", "character name"),
+    ]:
+        if match not in existing:
+            added.append(window.book.add(PronunciationRule(
+                match=match, replacement=replacement, note=note)))
+
+    window.script_panel.text_edit.setPlainText(
+        "Qwen shipped 23 voices on 2026-07-26, and Caius paid $5.50 for the 3rd one."
+    )
+    window.open_pronunciation()
+    settle(app, 500)
+    pron = window.pronounce_window
+    pron.table.selectRow(0)
+    pron.refresh_preview()
+    settle(app, 300)
+
+    pron_out = out.parent / "pronunciation.png"
+    ok2 = pron.grab().save(str(pron_out))
+    print(f"{'saved' if ok2 else 'FAILED to save'} {pron_out}")
+
+    for rule in added:
+        window.book.remove(rule.id)
+    window.library.remove(saved.id)
+    pron.close()
     window.close()
-    return 0 if ok else 1
+    return 0 if (ok and ok2) else 1
 
 
 if __name__ == "__main__":

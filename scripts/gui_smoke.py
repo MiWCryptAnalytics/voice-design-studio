@@ -144,6 +144,145 @@ def main() -> int:
     check("long script chunks", len(window.script_panel.chunks()) > 1,
           f"{len(window.script_panel.chunks())} chunks")
 
+    # ---- sub-talker ----
+    params = window.params_panel
+    params.subtalker_link.setChecked(True)
+    params.temperature.setValue(0.7)
+    app.processEvents()
+    check("linked sub-talker mirrors the main controls",
+          params.values()["subtalker_temperature"] == 0.7)
+
+    params.subtalker_link.setChecked(False)
+    params.subtalker_temperature.setValue(1.3)
+    app.processEvents()
+    check("unlinked sub-talker holds its own value",
+          params.values()["subtalker_temperature"] == 1.3
+          and params.values()["temperature"] == 0.7)
+    check("sub-talker controls disabled while linked",
+          not params.subtalker_temperature.isEnabled()
+          if params.subtalker_link.isChecked() else True)
+    params.reset_defaults()
+    check("reset relinks and restores model defaults",
+          params.subtalker_link.isChecked() and params.values()["max_new_tokens"] == 8192)
+
+    # ---- pronunciation ----
+    from voicestudio.core.pronounce import PronunciationRule  # noqa: E402
+
+    window.script_panel.text_edit.setPlainText("Qwen has 23 voices.")
+    rule = window.book.add(PronunciationRule(match="Qwen", replacement="Chwen"))
+    spoken = window.spoken(window.script_panel.script)
+    check("rules and normalization both reach the spoken text",
+          "Chwen" in spoken.text and "twenty-three" in spoken.text, spoken.text)
+    check("request carries the spoken text, not the raw text",
+          "Chwen" in window._build_request(window.script_panel.script, 1).text)
+
+    window.open_pronunciation()
+    app.processEvents()
+    pw = window.pronounce_window
+    check("pronunciation window opens", pw is not None and pw.isVisible())
+    check("window lists the rule", pw.table.rowCount() == len(window.book.all()))
+    pw.refresh_preview()
+    check("preview shows the transformed text", "Chwen" in pw.preview_out.toPlainText())
+
+    window.book.enabled = False
+    check("disabling the book passes text through untouched",
+          window.spoken("Qwen has 23 voices.").text == "Qwen has 23 voices.")
+    window.book.enabled = True
+    window.book.remove(rule.id)
+    pw.close()
+
+    # ---- dialogue ----
+    # The cast persists across sessions, so start from a known-empty one.
+    window.cast_panel.set_cast({})
+    window.script_panel.text_edit.setPlainText(
+        "NARRATOR: The door opened.\n"
+        "VILLAIN: You're late.\n"
+        "NARRATOR: Nobody answered.\n"
+    )
+    app.processEvents()
+    check("dialogue detected", window.script_panel.dialogue_script() is not None)
+    check("cast panel appears for dialogue", window.cast_panel.isVisible())
+    check("cast lists both speakers",
+          window.cast_panel._speakers == ["NARRATOR", "VILLAIN"],
+          str(window.cast_panel._speakers))
+    check("unassigned speakers reported",
+          sorted(window.cast_panel.unassigned()) == ["NARRATOR", "VILLAIN"])
+
+    before = len(window.history.all())
+    window.generate_dialogue()  # cast incomplete: must refuse without generating
+    app.processEvents()
+    check("incomplete cast blocks generation", len(window.history.all()) == before)
+
+    # A voice saved while the cast is on screen must appear without a reload.
+    def cast_combo_texts():
+        combo = window.cast_panel.table.cellWidget(0, 1)
+        return [combo.itemText(i) for i in range(combo.count())]
+
+    check("custom voice absent before saving",
+          not any("Gravel Guy" in t for t in cast_combo_texts()))
+    custom = window.library.add(
+        VoicePreset(name="Gravel Guy", instruct="a gravelly voice", seed=4242)
+    )
+    window.design_panel.libraryChanged.emit()
+    app.processEvents()
+    check("custom voice appears in the cast immediately",
+          any("Gravel Guy" in t for t in cast_combo_texts()))
+    check("pinned custom voice is marked in the cast",
+          any("Gravel Guy" in t and "📌" in t for t in cast_combo_texts()))
+    check("cast groups my voices separately from templates",
+          any("— My voices —" in t for t in cast_combo_texts())
+          and any("— Templates —" in t for t in cast_combo_texts()))
+
+    window.cast_panel.set_cast({"NARRATOR": f"preset:{custom.id}"})
+    window.cast_panel.refresh_voices()
+    check("custom voice is assignable",
+          window.cast_panel.instruct_for(f"preset:{custom.id}") == "a gravelly voice")
+
+    # Deleting an assigned voice must unassign it, not silently substitute another.
+    window.library.remove(custom.id)
+    window.design_panel.libraryChanged.emit()
+    app.processEvents()
+    check("deleting an assigned voice unassigns that speaker",
+          "NARRATOR" in window.cast_panel.unassigned())
+
+    templates = window.templates
+    window.cast_panel.set_cast({
+        "NARRATOR": f"template:{templates.get('nature-documentary').id}",
+        "VILLAIN": f"template:{templates.get('sinister-villain').id}",
+    })
+    window.cast_panel.set_speakers(["NARRATOR", "VILLAIN"])
+    check("cast complete after assignment", not window.cast_panel.unassigned())
+
+    check("voice locking is on by default", window.cast_panel.lock_voices.isChecked())
+    window.generate_dialogue()
+    check("dialogue generated", wait_for(window.host.jobDone, 600_000))
+    app.processEvents()
+    takes = window.history.all()
+    check("dialogue produced one joined take", len(takes) == before + 1,
+          f"{before} -> {len(takes)}")
+    check("segments retained for stem export",
+          window._last_segments is not None and len(window._last_segments[1]) == 3,
+          str(len(window._last_segments[1]) if window._last_segments else 0))
+    if window._last_segments:
+        segments = window._last_segments[1]
+        check("segments carry their speakers",
+              [s.speaker for s in segments] == ["NARRATOR", "VILLAIN", "NARRATOR"])
+        joined = takes[0].duration
+        parts = sum(s.duration + s.gap_after for s in segments)
+        check("joined duration matches segments plus gaps",
+              abs(joined - parts) < 0.05, f"{joined:.2f}s vs {parts:.2f}s")
+
+    # Unlocked dialogue must still work — it's the per-line fallback path.
+    before = len(window.history.all())
+    window.cast_panel.lock_voices.setChecked(False)
+    window.generate_dialogue()
+    check("unlocked dialogue still generates", wait_for(window.host.jobDone, 600_000))
+    app.processEvents()
+    check("unlocked run produced a take", len(window.history.all()) == before + 1)
+    check("unlocked run still yields per-line segments",
+          window._last_segments is not None and len(window._last_segments[1]) == 3)
+    window.cast_panel.lock_voices.setChecked(True)
+
     window.close()
     print("\nGUI SMOKE", "PASSED" if not failures else f"FAILED: {failures}")
     return 0 if not failures else 1

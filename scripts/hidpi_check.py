@@ -26,7 +26,10 @@ sys.path.insert(0, str(ROOT))
 
 from voicestudio.core.history import TakeHistory  # noqa: E402
 from voicestudio.core.library import VoiceLibrary  # noqa: E402
+from voicestudio.core.pronounce import PronunciationBook, PronunciationRule  # noqa: E402
+from voicestudio.ui.cast_panel import CastPanel  # noqa: E402
 from voicestudio.ui.design_panel import DesignPanel  # noqa: E402
+from voicestudio.ui.pronounce_window import PronunciationWindow  # noqa: E402
 from voicestudio.ui.metrics import refresh  # noqa: E402
 from voicestudio.ui.params_panel import ParamsPanel  # noqa: E402
 from voicestudio.ui.player import PlayerBar  # noqa: E402
@@ -53,16 +56,38 @@ def build_ui(app) -> tuple[QWidget, dict]:
     player = PlayerBar()
     takes = TakesPanel(history)
 
+    cast = CastPanel(library)
+    cast.set_speakers(["NARRATOR", "VILLAIN"])
+
+    # Expand the collapsible section so its controls are measured too.
+    params.subtalker_toggle.setChecked(True)
+    params.subtalker_link.setChecked(False)
+
     root = QWidget()
     row = QHBoxLayout(root)
     center = QVBoxLayout()
     center.addWidget(script)
+    center.addWidget(cast)
     center.addWidget(params)
     center.addWidget(player)
     row.addWidget(design, 3)
     row.addLayout(center, 4)
     row.addWidget(takes, 3)
-    return root, {"design": design, "script": script, "params": params, "takes": takes}
+    return root, {"design": design, "script": script, "params": params,
+                  "takes": takes, "cast": cast}
+
+
+def build_pronunciation(app) -> PronunciationWindow:
+    book = PronunciationBook()
+    book.save = lambda: None  # keep the check off disk
+    book.add(PronunciationRule(match="Qwen", replacement="Chwen"))
+    window = PronunciationWindow(
+        book,
+        languages=lambda: ["Auto", "English", "German"],
+        current_language=lambda: "English",
+        sample_text=lambda: "Qwen has 23 voices.",
+    )
+    return window
 
 
 def clipped(root: QWidget) -> list[str]:
@@ -127,6 +152,18 @@ def main() -> int:
         bad = clipped(root)
         check("no clipped buttons or combos", not bad,
               "; ".join(bad[:3]) if bad else "")
+
+        # The pronunciation window is its own top-level window.
+        pron = build_pronunciation(app)
+        pron.show()
+        app.processEvents()
+        bad_pron = clipped(pron)
+        check("pronunciation window has no clipped controls", not bad_pron,
+              "; ".join(bad_pron[:3]) if bad_pron else "")
+        check("pronunciation window scales with the font",
+              pron.width() >= m.ch(100), f"{pron.width()}px wide")
+        pron.close()
+        pron.deleteLater()
 
         root.close()
         root.deleteLater()

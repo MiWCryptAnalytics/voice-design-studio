@@ -2,5 +2,6 @@
 __pycache__/
 *.pyc
 
-# Test output audio (regenerate with scripts/smoke_test.py)
+# Test output audio (regenerate with the scripts that produce them)
 _smoke_out/
+_sweep_out/

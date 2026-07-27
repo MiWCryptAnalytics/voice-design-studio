@@ -1,5 +1,19 @@
 # Implementation plan — next four features
 
+> **Status: delivered.** All four shipped. Two findings changed the work as it went:
+>
+> - The **sub-talker sweep came back negative.** Settings 0.2–1.5 showed no
+>   monotonic trend in brightness, noisiness or cross-seed spread. A follow-up
+>   fixed-seed differencing check confirmed the parameters *are* wired and do
+>   change the rendition substantially — they just aren't a quality axis. The
+>   tooltip says exactly that instead of inventing a perceptual story.
+> - **Modal dialogs are untestable.** The cast-incomplete warning was a
+>   `QMessageBox` that blocked the headless suite forever. It became an inline
+>   status message, which is better UX anyway — the cast table already shows which
+>   speakers are unassigned.
+>
+> `max_new_tokens` stayed as scoped: a small correctness fix, not a feature.
+
 Written after two measurements that change what's worth building. Both are
 reproducible from the repo.
 

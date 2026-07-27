@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..core import dialogue as dialogue_mod
 from ..core.script import split_script
 from .metrics import metrics
 
@@ -30,6 +31,7 @@ class ScriptPanel(QFrame):
     generateRequested = pyqtSignal()
     variationsRequested = pyqtSignal(int)
     cancelRequested = pyqtSignal()
+    dialogueDetected = pyqtSignal(object)  # DialogueScript, or None when plain prose
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -137,6 +139,14 @@ class ScriptPanel(QFrame):
             return []
         return split_script(text) if self.split_enabled else [text]
 
+    def dialogue_script(self):
+        """The parsed script when it uses speaker labels, else None."""
+        text = self.script
+        if not text:
+            return None
+        parsed = dialogue_mod.parse(text)
+        return parsed if parsed.is_dialogue else None
+
     def set_languages(self, languages: list[str]) -> None:
         current = self.language_combo.currentText()
         self.language_combo.blockSignals(True)
@@ -156,10 +166,21 @@ class ScriptPanel(QFrame):
         text = self.script
         if not text:
             self.stats_label.setText("empty")
+            self.dialogueDetected.emit(None)
             return
+
         n = len(text)
-        parts = self.chunks()
-        if len(parts) > 1:
-            self.stats_label.setText(f"{n} chars · {len(parts)} chunks")
+        parsed = self.dialogue_script()
+        if parsed is not None:
+            speakers = len(parsed.speakers)
+            self.stats_label.setText(
+                f"{n} chars · {len(parsed.lines)} lines · {speakers} speakers"
+            )
+            self.generate_button.setText("Generate dialogue")
         else:
-            self.stats_label.setText(f"{n} chars")
+            parts = self.chunks()
+            self.stats_label.setText(
+                f"{n} chars · {len(parts)} chunks" if len(parts) > 1 else f"{n} chars"
+            )
+            self.generate_button.setText("Generate")
+        self.dialogueDetected.emit(parsed)
