@@ -21,9 +21,9 @@ doubles as a browsable voice catalogue. Save anything you like into **My Voices*
 that forks a copy, so built-in templates are never modified.
 
 **Script and preview (center).** The text to speak, a language selector (11 options
-reported by the model), and sampling controls. Long scripts split on sentence
-boundaries and generate chunk-by-chunk under one seed, then join into a single take.
-The waveform is click-to-seek.
+reported by the model), and sampling controls. Scripts up to **1500 characters
+generate in a single pass**, so most narration has no joins at all; longer ones split
+on sentence boundaries and are crossfaded together. The waveform is click-to-seek.
 
 A collapsible **Sub-talker** section exposes the model's second sampling stage,
 which predicts the residual codebooks carrying acoustic detail. It's linked to the
@@ -56,6 +56,27 @@ than failing halfway through, and deleting a voice that was cast unassigns that
 speaker rather than silently substituting a different one. **Tools → Export dialogue
 stems** writes one WAV per line plus a `cue_sheet.tsv` of line timings for a video or
 game editor.
+
+### Why chunk joins used to be audible
+
+For a *single-voice* script the voice barely drifts between chunks — measured
+timbre difference is ~0.02, well below the metric's ~0.07 noise floor, and level
+varies by 0.14 dB. Neither is what you hear.
+
+The seam is **prosodic**. Each chunk is generated as an independent utterance, so
+it ends on a terminal pitch fall and the next begins with a pitch reset. Measured
+at the same sentence boundary ([seam_study.py](scripts/seam_study.py)): the pitch
+jumps **65 Hz across a chunk join** but only **32 Hz inside a single pass** — twice
+the discontinuity. No amount of gap tuning fixes that, because the phrasing itself
+restarts.
+
+So the fix is fewer chunks. The old 300-character limit was ~8× more conservative
+than necessary: this checkpoint renders **2458 characters in one pass** (172 s of
+audio, 26% of the token budget) before it starts dropping text at ~3650. The limit
+is now **1500**, keeping a wide margin while letting most scripts through seam-free.
+Where a join is still needed, chunks are joined with a 15 ms equal-power crossfade
+and no added silence — they already carry their own pause from the sentence
+boundary they were split on, and stacking more on top only widened the gap.
 
 ### Keeping a voice steady
 
@@ -269,7 +290,8 @@ Four studies document model behaviour rather than testing code:
 [subtalker_sweep.py](scripts/subtalker_sweep.py) (what the detail stage does),
 [consistency_study.py](scripts/consistency_study.py) (whether sampling settings
 steady a voice — they don't), and
-[voice_lock_study.py](scripts/voice_lock_study.py) (what does).
+[voice_lock_study.py](scripts/voice_lock_study.py) (what does), and
+[seam_study.py](scripts/seam_study.py) (why chunk joins are audible).
 
 A caution on all four: the identity metric is a long-term-average-spectrum
 distance, and chopping audio into windows alone produces ≈0.07 of apparent

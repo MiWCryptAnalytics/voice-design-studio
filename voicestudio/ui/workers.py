@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
+from ..core import audio as audio_utils
 from ..core.segment import split_on_silence
 from ..engine import SynthEngine, SynthRequest, load_model, new_seed
 
@@ -26,6 +27,10 @@ from ..engine import SynthEngine, SynthRequest, load_model, new_seed
 LINE_JOINER = " "
 # Keep a single pass to a sensible length so it stays coherent and splittable.
 MAX_GROUP_CHARS = 400
+# Chunks of a long script already carry their own trailing and leading silence at
+# the sentence boundary they were split on. Adding more on top just widens the
+# seam, so the join contributes nothing but a crossfade.
+SCRIPT_JOIN_GAP = 0.0
 
 # Job modes
 SINGLE = "single"          # one item -> one take
@@ -410,11 +415,13 @@ def _batches(
 
 
 def _concat_with_gaps(segments: list[Segment], sample_rate: int) -> np.ndarray:
-    pieces: list[np.ndarray] = []
-    for segment in segments:
-        pieces.append(segment.waveform.astype(np.float32))
-        if segment.gap_after > 0:
-            pieces.append(
-                np.zeros(int(segment.gap_after * sample_rate), dtype=np.float32)
-            )
-    return np.concatenate(pieces) if pieces else np.zeros(0, dtype=np.float32)
+    """Join segments, crossfading each seam rather than hard-splicing it."""
+    if not segments:
+        return np.zeros(0, dtype=np.float32)
+
+    out = segments[0].waveform.astype(np.float32)
+    for previous, segment in zip(segments, segments[1:]):
+        out = audio_utils.concat_crossfade(
+            [out, segment.waveform], sample_rate, previous.gap_after
+        )
+    return out

@@ -138,11 +138,21 @@ def main() -> int:
         str([t.seed for t in new_takes]),
     )
 
-    # Long script chunking
-    long_text = " ".join(["This is sentence number %d." % i for i in range(40)])
+    # Long script chunking. The limit is 1500 chars now, so a script has to be
+    # genuinely long before it needs splitting at all.
+    medium = " ".join(["This is sentence number %d." % i for i in range(30)])
+    window.script_panel.text_edit.setPlainText(medium)
+    check("a medium script stays in one pass (no seams)",
+          len(window.script_panel.chunks()) == 1,
+          f"{len(medium)} chars -> {len(window.script_panel.chunks())} chunk")
+
+    long_text = " ".join(["This is sentence number %d." % i for i in range(90)])
     window.script_panel.text_edit.setPlainText(long_text)
-    check("long script chunks", len(window.script_panel.chunks()) > 1,
-          f"{len(window.script_panel.chunks())} chunks")
+    check("a genuinely long script still chunks",
+          len(window.script_panel.chunks()) > 1,
+          f"{len(long_text)} chars -> {len(window.script_panel.chunks())} chunks")
+    check("chunks respect the limit",
+          max(len(c) for c in window.script_panel.chunks()) <= 1500)
 
     # ---- sub-talker ----
     params = window.params_panel

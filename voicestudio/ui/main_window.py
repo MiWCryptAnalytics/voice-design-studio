@@ -41,6 +41,7 @@ from .workers import (
     COMPARE,
     DIALOGUE,
     SCRIPT,
+    SCRIPT_JOIN_GAP,
     SINGLE,
     VARIATIONS,
     EngineHost,
@@ -317,7 +318,13 @@ class MainWindow(QMainWindow):
         items = [JobItem(text=self.spoken(c).text) for c in chunks]
         mode = SCRIPT if len(chunks) > 1 else SINGLE
         self._submit(
-            SynthJob(request=request, items=items, seeds=[seed], mode=mode),
+            SynthJob(
+                request=request,
+                items=items,
+                seeds=[seed],
+                mode=mode,
+                gap_seconds=SCRIPT_JOIN_GAP,
+            ),
             autoplay=True,
         )
 

@@ -6,7 +6,18 @@ import re
 
 # Sentence-ish boundaries, including CJK full-width punctuation.
 _SENTENCE_END = re.compile(r"(?<=[.!?。！？…])\s+|(?<=[.!?。！？…])(?=[^\s])")
-DEFAULT_MAX_CHARS = 300
+
+# Every chunk boundary is an audible seam: each chunk is generated as an
+# independent utterance, so it ends with a terminal pitch fall and the next one
+# starts with a pitch reset. Measured, that doubles the pitch discontinuity at a
+# sentence boundary (65 Hz across a join vs 32 Hz inside one pass).
+#
+# So the goal is *fewer chunks*, not smarter joining. Measured single-pass limits
+# on this checkpoint: 2458 characters still renders in full (172 s of audio, 26%
+# of the token budget); 3650 starts dropping text. 1500 keeps a wide margin while
+# letting most scripts through in a single pass with no seams at all.
+DEFAULT_MAX_CHARS = 1500
+SAFE_SINGLE_PASS_CHARS = 2400
 
 
 def split_script(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> list[str]:

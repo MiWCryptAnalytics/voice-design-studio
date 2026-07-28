@@ -282,10 +282,32 @@ true("every line lands in exactly one batch",
 eq("short parts stay in one pass", len(_batches(long_items[:2], 400)), 1)
 
 print("\n--- script chunking (regression) ---")
+from voicestudio.core.script import DEFAULT_MAX_CHARS  # noqa: E402
+
 long_text = " ".join(f"Sentence number {i}." for i in range(40))
 chunks = split_script(long_text, 120)
 true("chunks stay under the limit", max(len(c) for c in chunks) <= 120)
 eq("short text is one chunk", split_script("Hello."), ["Hello."])
+# Fewer chunks means fewer seams; each join restarts the phrase contour.
+true("default limit allows a whole page in one pass", DEFAULT_MAX_CHARS >= 1000,
+     str(DEFAULT_MAX_CHARS))
+eq("a 1000-char script needs no splitting", len(split_script("word " * 200)), 1)
+
+print("\n--- crossfaded joining ---")
+from voicestudio.core.audio import concat_crossfade  # noqa: E402
+
+a, b = speech(1.0), speech(1.0, 180.0)
+joined = concat_crossfade([a, b], SR, gap_seconds=0.0, fade_ms=15)
+overlap = int(SR * 0.015)
+true("crossfade shortens the result by the overlap",
+     abs(joined.size - (a.size + b.size - overlap)) <= 2,
+     f"{joined.size} vs {a.size + b.size - overlap}")
+true("no hard discontinuity at the seam",
+     float(np.abs(np.diff(joined)).max()) <= float(np.abs(np.diff(a)).max()) * 2.5)
+eq("a single piece passes through", concat_crossfade([a], SR).size, a.size)
+eq("nothing in, nothing out", concat_crossfade([], SR).size, 0)
+gapped = concat_crossfade([a, b], SR, gap_seconds=0.25, fade_ms=15)
+true("an explicit gap still lengthens the result", gapped.size > joined.size)
 
 print("\nUNIT TESTS", "PASSED" if not failures else f"FAILED: {failures}")
 raise SystemExit(1 if failures else 0)

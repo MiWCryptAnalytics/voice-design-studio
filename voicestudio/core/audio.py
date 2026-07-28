@@ -45,6 +45,45 @@ def concat(
     return np.concatenate(out)
 
 
+def concat_crossfade(
+    pieces: list[np.ndarray],
+    sample_rate: int,
+    gap_seconds: float = 0.0,
+    fade_ms: float = 15.0,
+) -> np.ndarray:
+    """Join pieces with a short crossfade so the seam isn't a hard splice.
+
+    Generated chunks already end and begin with their own near-silence, which
+    carries faint room tone. Butting them against inserted digital zero leaves an
+    audible hole, so overlap the boundary slightly instead.
+    """
+    pieces = [p for p in pieces if p is not None and p.size]
+    if not pieces:
+        return np.zeros(0, dtype=np.float32)
+    if len(pieces) == 1:
+        return pieces[0].astype(np.float32)
+
+    fade = max(0, int(sample_rate * fade_ms / 1000.0))
+    gap = np.zeros(int(max(0.0, gap_seconds) * sample_rate), dtype=np.float32)
+
+    out = pieces[0].astype(np.float32)
+    for piece in pieces[1:]:
+        piece = piece.astype(np.float32)
+        if gap.size:
+            out = np.concatenate([out, gap])
+        overlap = min(fade, out.size, piece.size)
+        if overlap <= 0:
+            out = np.concatenate([out, piece])
+            continue
+        # Equal-power crossfade keeps perceived level steady through the seam.
+        ramp = np.linspace(0.0, 1.0, overlap, dtype=np.float32)
+        blended = out[-overlap:] * np.cos(ramp * np.pi / 2) + piece[:overlap] * np.sin(
+            ramp * np.pi / 2
+        )
+        out = np.concatenate([out[:-overlap], blended, piece[overlap:]])
+    return out
+
+
 def envelope(wav: np.ndarray, buckets: int) -> np.ndarray:
     """Downsample to per-bucket peak magnitudes for waveform drawing.
 
