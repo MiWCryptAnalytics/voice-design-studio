@@ -140,6 +140,17 @@ model = AutoModel.from_pretrained(MODEL_ID, dtype=torch.bfloat16, device_map="cu
 **Do not upgrade `transformers` past 4.57.3.** Version 5.x has no `qwen3_tts` and the
 model will fail to load. `qwen-tts` pins this for you.
 
+**No flash-attn, on purpose.** The model loads with `attn_implementation="sdpa"`:
+PyTorch's fused attention already uses flash-style kernels on Ampere+, and at
+1.7B with a few thousand codec tokens per pass the difference from a dedicated
+flash-attn build is negligible — while the build itself is a 30-minute CUDA
+compile that would break `pip install -r requirements.txt` for most people.
+The "flash-attn is not installed" banner qwen_tts prints at import time comes
+from the **25 Hz** tokenizer's Whisper encoder, a component the 12 Hz
+checkpoints never execute; installing flash-attn would silence it without
+speeding up anything this app runs. The banner is expected and harmless —
+ignore it.
+
 Generation is driven directly rather than through the `qwen_tts` convenience wrapper,
 so the app controls seeding and per-request parameters. A voice description is sent as
 a user turn and the spoken text as an assistant turn; the model returns codec tokens

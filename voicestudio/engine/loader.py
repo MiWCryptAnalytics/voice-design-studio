@@ -15,6 +15,9 @@ from typing import Callable
 import torch
 from transformers import AutoConfig, AutoModel, AutoProcessor
 
+# Importing qwen_tts prints a "flash-attn is not installed" banner. It comes
+# from the 25 Hz tokenizer's Whisper encoder, which the 12 Hz checkpoints this
+# app loads never execute — harmless, see DESIGN.md.
 from qwen_tts.core.models import (
     Qwen3TTSConfig,
     Qwen3TTSForConditionalGeneration,
