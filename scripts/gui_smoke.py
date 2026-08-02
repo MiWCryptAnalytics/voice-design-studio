@@ -3,11 +3,23 @@
 Run:  QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/gui_smoke.py
 """
 
+import atexit
+import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
-from PyQt6.QtCore import QEventLoop, QTimer
-from PyQt6.QtWidgets import QApplication
+# Hermetic data dir, set before any voicestudio import resolves DATA_DIR: the
+# suite must not read the developer's real settings (a persisted voice profile
+# or an unchecked "split long scripts" would change what the checks see), and
+# must not write test takes into their real history.
+_scratch = tempfile.mkdtemp(prefix="voicestudio-smoke-")
+os.environ["XDG_DATA_HOME"] = _scratch
+atexit.register(shutil.rmtree, _scratch, True)
+
+from PyQt6.QtCore import QEventLoop, QTimer  # noqa: E402
+from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -48,6 +60,23 @@ def wait_for(signal, timeout_ms: int) -> bool:
 
 def main() -> int:
     app = QApplication(sys.argv)
+
+    # HiDPI auto-scale: inert headless, but a forced factor must reach the font.
+    from voicestudio.ui.scaling import apply_auto_scale  # noqa: E402
+
+    base_font_pt = app.font().pointSizeF()
+    check("auto scale is a no-op on the offscreen platform",
+          apply_auto_scale(app) == 1.0)
+    os.environ["VOICESTUDIO_SCALE"] = "1.5"
+    factor = apply_auto_scale(app)
+    check("forced scale reaches the application font",
+          factor == 1.5 and abs(app.font().pointSizeF() - base_font_pt * 1.5) < 0.05,
+          f"factor={factor}, font {base_font_pt} -> {app.font().pointSizeF()}")
+    del os.environ["VOICESTUDIO_SCALE"]
+    restored_font = app.font()
+    restored_font.setPointSizeF(base_font_pt)
+    app.setFont(restored_font)
+
     app.setStyleSheet(build_qss(refresh()))
 
     window = MainWindow()

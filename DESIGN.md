@@ -184,6 +184,21 @@ That matters because Qt scales device-independent pixels by `devicePixelRatio`
 but **not** by font DPI or your chosen system font size, which is how most
 desktops actually scale text. Sizing off font metrics covers all three.
 
+**Auto-scale on unconfigured screens.** Font-derived sizing only helps once
+something sets a sensible font or scale — and a bare X11 session on a 4K
+monitor sets neither: Qt reports 96 logical DPI and everything renders tiny. At
+startup ([scaling.py](voicestudio/ui/scaling.py)) the app compares the primary
+screen's *physical* DPI against the 96 baseline and enlarges the application
+font to match, which scales the entire UI in one move. It only acts when
+nothing else has: any `QT_*` scaling override, a devicePixelRatio above 1
+(Wayland, configured X11), or logical DPI above ~110 (`Xft.dpi`) all mean
+scaling is somebody else's job, and screens whose EDID-reported size is
+implausible (below 50 or above 400 DPI — TVs and projectors routinely lie) are
+left alone. The factor moves in quarter steps and caps at 3×.
+`VOICESTUDIO_SCALE=<factor>` forces it; `VOICESTUDIO_SCALE=1` disables it. The
+decision ladder is a pure function, unit-tested across the monitor zoo in
+[unit_tests.py](scripts/unit_tests.py).
+
 Fractional scale factors are preserved (`PassThrough` rounding), so 125% and
 150% aren't rounded to 100% or 200%. The usual Qt knobs all work:
 

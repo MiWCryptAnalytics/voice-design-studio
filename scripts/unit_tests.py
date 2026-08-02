@@ -337,5 +337,32 @@ try:
 except ValueError:
     true("empty embedding is rejected", True)
 
+print("\n--- HiDPI auto-scale ---")
+from voicestudio.ui.scaling import pick_scale  # noqa: E402  (pure, no Qt)
+
+BARE = {}  # no overrides, unconfigured desktop
+eq("27-inch 4K on bare X11 scales", pick_scale(96, 163, 1.0, BARE), 1.75)
+eq("24-inch 4K rounds to whole step", pick_scale(96, 184, 1.0, BARE), 2.0)
+eq("32-inch 4K gets a gentler step", pick_scale(96, 137, 1.0, BARE), 1.5)
+eq("13-inch 4K laptop caps at 3", pick_scale(96, 331, 1.0, BARE), 3.0)
+eq("1080p desktop stays unscaled", pick_scale(96, 92, 1.0, BARE), 1.0)
+eq("4K TV at couch DPI stays unscaled", pick_scale(96, 80, 1.0, BARE), 1.0)
+eq("implausible EDID (high) is ignored", pick_scale(96, 500, 1.0, BARE), 1.0)
+eq("implausible EDID (low) is ignored", pick_scale(96, 20, 1.0, BARE), 1.0)
+eq("compositor scaling wins", pick_scale(96, 163, 2.0, BARE), 1.0)
+eq("configured Xft.dpi wins", pick_scale(144, 163, 1.0, BARE), 1.0)
+eq("QT_SCALE_FACTOR wins",
+   pick_scale(96, 163, 1.0, {"QT_SCALE_FACTOR": "2"}), 1.0)
+eq("forced factor overrides everything",
+   pick_scale(96, 163, 2.0, {"VOICESTUDIO_SCALE": "1.5"}), 1.5)
+eq("forced 1 disables auto-scaling",
+   pick_scale(96, 163, 1.0, {"VOICESTUDIO_SCALE": "1"}), 1.0)
+eq("unparseable forced value falls back to auto",
+   pick_scale(96, 163, 1.0, {"VOICESTUDIO_SCALE": "big"}), 1.75)
+eq("forced factor clamps high",
+   pick_scale(96, 96, 1.0, {"VOICESTUDIO_SCALE": "9"}), 3.0)
+eq("forced factor clamps low",
+   pick_scale(96, 96, 1.0, {"VOICESTUDIO_SCALE": "0.1"}), 0.5)
+
 print("\nUNIT TESTS", "PASSED" if not failures else f"FAILED: {failures}")
 raise SystemExit(1 if failures else 0)

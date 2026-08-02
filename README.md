@@ -82,8 +82,11 @@ outright.
 Keyboard: `Ctrl+Enter` generate · `Space` play/pause · `Ctrl+S` save voice ·
 `Ctrl+1`/`Ctrl+2` play A/B · `Esc` cancel.
 
-The UI scales with your desktop font and display settings, including fractional
-scales; `QT_FONT_DPI` and `QT_SCALE_FACTOR` work as usual.
+On a HiDPI screen the app picks a sensible scale by itself when the desktop
+hasn't configured one (a bare X11 session on a 4K monitor, say). Force a factor
+with `VOICESTUDIO_SCALE=1.5`, disable with `VOICESTUDIO_SCALE=1`; any desktop
+scaling and the usual `QT_FONT_DPI` / `QT_SCALE_FACTOR` knobs are respected
+untouched.
 
 ## Tests
 
