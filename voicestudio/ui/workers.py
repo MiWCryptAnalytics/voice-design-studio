@@ -19,7 +19,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from ..core import audio as audio_utils
 from ..core.segment import split_on_silence
-from ..engine import SynthEngine, SynthRequest, load_model, new_seed
+from ..engine import BASE_MODEL_ID, SynthEngine, SynthRequest, load_model, new_seed
 
 # Joining a speaker's lines with a plain space is what produces a clean silence
 # at each sentence boundary; decorated joiners ("…") produce extra gaps that
@@ -121,14 +121,51 @@ class EngineHost(QObject):
     jobDone = pyqtSignal(str)  # mode, or "cancelled"
     jobFailed = pyqtSignal(str)
 
+    profileReady = pyqtSignal(object)  # VoiceProfile
+    profileFailed = pyqtSignal(str)
+
     def __init__(self) -> None:
         super().__init__()
         self._engine: SynthEngine | None = None
+        # The Base checkpoint (speaker encoder + embedding-conditioned
+        # generation). Loaded lazily on the first profile action so users who
+        # never clone pay nothing for it.
+        self._clone_engine: SynthEngine | None = None
         self._cancel = threading.Event()
 
     @property
     def is_ready(self) -> bool:
         return self._engine is not None
+
+    def _ensure_clone_engine(self) -> SynthEngine:
+        if self._clone_engine is None:
+            self.loadProgress.emit("Loading voice-clone model (first use)…")
+            loaded = load_model(
+                model_id=BASE_MODEL_ID, progress=self.loadProgress.emit
+            )
+            self._clone_engine = SynthEngine(loaded)
+        return self._clone_engine
+
+    def _engine_for(self, request: SynthRequest) -> SynthEngine:
+        if request.voice_profile is not None:
+            return self._ensure_clone_engine()
+        return self._engine
+
+    @pyqtSlot(str, str)
+    def extract_profile(self, wav_path: str, name: str) -> None:
+        """Turn a reference WAV into a VoiceProfile.
+
+        The embedding is computed here, exactly once per profile — generation
+        jobs only ever reuse the stored vector.
+        """
+        try:
+            engine = self._ensure_clone_engine()
+            wav, sr = audio_utils.read_wav(wav_path)
+            profile = engine.extract_profile(wav, sr, name=name, source=wav_path)
+            self.profileReady.emit(profile)
+        except Exception as exc:
+            traceback.print_exc()
+            self.profileFailed.emit(f"{type(exc).__name__}: {exc}")
 
     def cancel(self) -> None:
         """Thread-safe; checked between items and between seeds."""
@@ -158,6 +195,11 @@ class EngineHost(QObject):
         done = 0
 
         try:
+            # A profile job runs on the Base checkpoint; resolve it up front so
+            # a first-use load (or download) happens once, before the loop, and
+            # its progress isn't attributed to a specific line.
+            if job.request.voice_profile is not None:
+                self._ensure_clone_engine()
             for index, seed in enumerate(job.seeds):
                 if self._cancel.is_set():
                     break
@@ -210,7 +252,7 @@ class EngineHost(QObject):
         per_item = replace(request, text=item.text)
         if item.instruct is not None:
             per_item = replace(per_item, instruct=item.instruct)
-        return self._engine.synthesize(per_item)
+        return self._engine_for(per_item).synthesize(per_item)
 
     def _run_one(
         self, job: SynthJob, request: SynthRequest, item: JobItem,
@@ -242,7 +284,7 @@ class EngineHost(QObject):
         rendered: dict[int, np.ndarray] = {}
         elapsed = 0.0
         truncated = False
-        sample_rate = self._engine.sample_rate
+        sample_rate = self._engine_for(request).sample_rate
         done = done_before
         fallbacks = 0
 
@@ -334,7 +376,7 @@ class EngineHost(QObject):
         segments: list[Segment] = []
         elapsed = 0.0
         truncated = False
-        sample_rate = self._engine.sample_rate
+        sample_rate = self._engine_for(request).sample_rate
         total = len(job.items)
 
         for i, item in enumerate(job.items):

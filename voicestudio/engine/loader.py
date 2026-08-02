@@ -22,6 +22,10 @@ from qwen_tts.core.models import (
 )
 
 MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+# The Base checkpoint is the only one in the family with a speaker encoder, so
+# voice-profile extraction and embedding-conditioned generation both need it.
+# It shares the architecture above and loads through the same path.
+BASE_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 
 # Everything the model and processor need. Checked before choosing offline, so a
 # partially-downloaded cache doesn't turn into a confusing load failure.

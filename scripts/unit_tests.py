@@ -309,5 +309,33 @@ eq("nothing in, nothing out", concat_crossfade([], SR).size, 0)
 gapped = concat_crossfade([a, b], SR, gap_seconds=0.25, fade_ms=15)
 true("an explicit gap still lengthens the result", gapped.size > joined.size)
 
+print("\n--- voice profiles ---")
+import tempfile  # noqa: E402
+
+from voicestudio.core.voiceprofile import VoiceProfile  # noqa: E402
+
+profile = VoiceProfile(
+    name="Warm narrator", embedding=np.arange(8, dtype=np.float64),
+    source_wav="/tmp/ref.wav",
+)
+eq("embedding is normalized to float32", profile.embedding.dtype, np.dtype("float32"))
+true("embedding is flattened to 1-D",
+     VoiceProfile(name="x", embedding=np.ones((2, 4))).embedding.shape == (8,))
+
+with tempfile.TemporaryDirectory() as tmp:
+    saved = profile.save(Path(tmp) / "profile")  # suffix added automatically
+    eq("save appends the .npz suffix", saved.suffix, ".npz")
+    loaded = VoiceProfile.load(saved)
+    eq("roundtrip keeps the name", loaded.name, profile.name)
+    eq("roundtrip keeps the source path", loaded.source_wav, profile.source_wav)
+    true("roundtrip keeps the embedding bit-exact",
+         np.array_equal(loaded.embedding, profile.embedding))
+
+try:
+    VoiceProfile(name="empty", embedding=np.zeros(0))
+    true("empty embedding is rejected", False)
+except ValueError:
+    true("empty embedding is rejected", True)
+
 print("\nUNIT TESTS", "PASSED" if not failures else f"FAILED: {failures}")
 raise SystemExit(1 if failures else 0)

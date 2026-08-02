@@ -16,6 +16,7 @@ def _data_root() -> Path:
 DATA_DIR = _data_root()
 TAKES_DIR = DATA_DIR / "takes"
 EXPORTS_DIR = DATA_DIR / "exports"
+PROFILES_DIR = DATA_DIR / "profiles"
 PRESETS_FILE = DATA_DIR / "presets.json"
 HISTORY_FILE = DATA_DIR / "history.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
@@ -25,7 +26,7 @@ TEMPLATES_FILE = ASSETS_DIR / "templates.json"
 
 
 def ensure_dirs() -> None:
-    for d in (DATA_DIR, TAKES_DIR, EXPORTS_DIR):
+    for d in (DATA_DIR, TAKES_DIR, EXPORTS_DIR, PROFILES_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -53,6 +54,8 @@ class Settings:
     cast: dict = field(default_factory=dict)  # speaker -> voice key
     lock_voices: bool = True
     window_geometry: list[int] = field(default_factory=list)
+    # Path to the active VoiceProfile .npz; empty means text-description mode.
+    voice_profile: str = ""
 
     @classmethod
     def load(cls) -> "Settings":

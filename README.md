@@ -18,7 +18,11 @@ setting) composes an English sentence into the description field, which stays fu
 editable; editing by hand detaches it from the traits rather than fighting them.
 **Audition** generates any template against a fixed demo line and seed, so the picker
 doubles as a browsable voice catalogue. Save anything you like into **My Voices** —
-that forks a copy, so built-in templates are never modified.
+that forks a copy, so built-in templates are never modified. A **VOICE PROFILE**
+section pins a speaker exactly: import (or drag-drop) a reference `.wav`, or
+**Extract Voice Profile** from the current description, and every line is then
+conditioned on one fixed speaker embedding instead of re-deriving a voice from
+text — see *Keeping a voice steady* below.
 
 **Script and preview (center).** The text to speak, a language selector (11 options
 reported by the model), and sampling controls. Scripts up to **1500 characters
@@ -85,12 +89,25 @@ voice — generate the same description twice and you get two slightly different
 readings. Across a scene that drift is audible, and it's the main thing that makes
 multi-voice output sound wrong.
 
-This checkpoint offers no speaker-locking mechanism to fix it directly. ICL and
-voice cloning both need a speaker embedding, and `extract_speaker_embedding` fails
-here because the VoiceDesign checkpoint ships no speaker encoder — those paths
-belong to the **VoiceClone** and **CustomVoice** checkpoints.
+The VoiceDesign checkpoint offers no speaker-locking mechanism to fix it directly:
+it ships no speaker encoder, so `extract_speaker_embedding` fails there. Two
+mechanisms in the studio work around that, one exact and one statistical.
 
-What does work: a voice is genuinely fixed *inside a single generation*, because the
+**Voice profiles (exact).** The **Base** checkpoint of the same family *does* carry
+a speaker encoder plus embedding-conditioned generation, and the studio loads it
+lazily the first time you use a profile. Either drop/import a reference `.wav` into
+the **VOICE PROFILE** section, or click **Extract Voice Profile** to render a golden
+sample of the current description and lock its speaker. The embedding (x-vector) is
+extracted **once**, saved to disk, and every subsequent line — single takes,
+whole scripts, variations, rerolls — is conditioned on that same fixed vector, so
+the speaker cannot shift with the line's text. While a profile is active the talker
+temperature is capped at 0.7 (the identity is pinned by the embedding; the cooler
+talker keeps the rhythm consistent from line to line), the seed stays uniform
+across a script batch, and the description editor is ignored. **Clear** returns to
+description mode. Dialogue keeps its per-speaker cast voices — a single embedding
+would collapse every character into one speaker.
+
+**Voice locking (statistical, dialogue).** A voice is genuinely fixed *inside a single generation*, because the
 audio is one continuous sample. So **Keep each voice steady across its lines** (on by
 default) renders all of a speaker's lines in one pass and splits them apart on the
 silences between sentences. Measured over an interleaved two-hander

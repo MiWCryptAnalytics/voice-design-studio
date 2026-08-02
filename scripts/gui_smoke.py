@@ -75,6 +75,42 @@ def main() -> int:
     window.design_panel.set_instruct(template.instruct, detached=False)
     check("template fills description", window.design_panel.instruct == template.instruct)
 
+    # Voice profile: UI wiring and request routing. Uses a synthetic embedding
+    # so none of this needs the Base checkpoint.
+    import numpy as np  # noqa: E402
+
+    from voicestudio.engine import VoiceProfile  # noqa: E402
+
+    dp = window.design_panel
+    check("profile controls exist",
+          hasattr(dp, "drop_zone") and dp.import_profile_button.isEnabled()
+          and dp.extract_profile_button.isEnabled())
+    check("no profile at start", window.voice_profile is None)
+    check("clear disabled without a profile", not dp.clear_profile_button.isEnabled())
+
+    fake = VoiceProfile(name="__probe__", embedding=np.ones(192, dtype=np.float32))
+    window.voice_profile = fake
+    dp.set_profile_status(fake.name)
+    check("profile status shows the name", "__probe__" in dp.profile_label.text())
+    check("clear enabled with a profile", dp.clear_profile_button.isEnabled())
+
+    window.params_panel.temperature.setValue(0.9)
+    probe_request = window._build_request("Testing.", 1234)
+    check("profile rides on the request", probe_request.voice_profile is fake)
+    check("clone temperature capped at 0.7",
+          abs(probe_request.temperature - 0.7) < 1e-9, str(probe_request.temperature))
+    check("sub-talker follows the cap while linked",
+          abs(probe_request.subtalker_temperature - 0.7) < 1e-9)
+    probe_request = window._build_request("Testing.", 1234, use_profile=False)
+    check("profile can be bypassed",
+          probe_request.voice_profile is None and probe_request.temperature == 0.9)
+
+    window._clear_profile()
+    check("clear drops the profile", window.voice_profile is None)
+    check("cleared profile empties the setting", window.settings.voice_profile == "")
+    check("status returns to description mode",
+          not dp.clear_profile_button.isEnabled())
+
     before = len(window.history.all())
     window.script_panel.language_combo.setCurrentText("English")
     window.generate_one()

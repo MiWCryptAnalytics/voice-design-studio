@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QGuiApplication, QKeySequence, QShortcut
@@ -23,12 +25,12 @@ from PyQt6.QtWidgets import (
 from .. import APP_NAME
 from ..core import audio as audio_utils
 from ..core import dialogue as dialogue_mod
-from ..core.config import EXPORTS_DIR, Settings, ensure_dirs
+from ..core.config import EXPORTS_DIR, PROFILES_DIR, Settings, ensure_dirs
 from ..core.history import Take, TakeHistory
 from ..core.library import VoiceLibrary
 from ..core.pronounce import PronunciationBook, SpokenText
 from ..core.templates import load_templates
-from ..engine import SynthRequest, new_seed
+from ..engine import SynthRequest, VoiceProfile, new_seed
 from .cast_panel import CastPanel
 from .design_panel import DesignPanel
 from .metrics import metrics
@@ -51,9 +53,16 @@ from .workers import (
 )
 
 
+# With a fixed speaker embedding the voice can't drift, but the talker still
+# samples rhythm freely — capping its temperature a little below the 0.9
+# default keeps pacing consistent from line to line.
+CLONE_TEMPERATURE = 0.7
+
+
 class MainWindow(QMainWindow):
     loadRequested = pyqtSignal()
     jobRequested = pyqtSignal(object)
+    profileRequested = pyqtSignal(str, str)  # wav path, display name
 
     def __init__(self) -> None:
         super().__init__()
@@ -72,6 +81,13 @@ class MainWindow(QMainWindow):
         # When set, the next two takes get pinned into the A/B slots.
         self._ab_capture: list[str] | None = None
         self._last_segments: tuple | None = None
+        # The active fixed-embedding voice; None means text-description mode.
+        self.voice_profile: VoiceProfile | None = None
+        self._profile_path: Path | None = None
+        # Golden-sample flow: name to give the take being captured, then the
+        # (wav, name) pair waiting for extraction once the job finishes.
+        self._capture_profile: str | None = None
+        self._profile_pending: tuple[str, str] | None = None
 
         self.setWindowTitle(APP_NAME)
         self.resize(*self._default_size())
@@ -99,6 +115,11 @@ class MainWindow(QMainWindow):
         self.design_panel.seedApplied.connect(self._apply_pinned_seed)
         # Saving or deleting a voice must show up in the cast immediately.
         self.design_panel.libraryChanged.connect(self._on_library_changed)
+        self.design_panel.profileImportRequested.connect(self._import_profile)
+        self.design_panel.profileExtractRequested.connect(
+            self._extract_profile_from_description
+        )
+        self.design_panel.profileCleared.connect(self._clear_profile)
 
         self.script_panel = ScriptPanel()
         self.script_panel.generateRequested.connect(self.generate_one)
@@ -233,6 +254,7 @@ class MainWindow(QMainWindow):
 
         self.loadRequested.connect(self.host.load)
         self.jobRequested.connect(self.host.run_job)
+        self.profileRequested.connect(self.host.extract_profile)
 
         self.host.loadProgress.connect(self._on_load_progress)
         self.host.loadReady.connect(self._on_load_ready)
@@ -242,6 +264,8 @@ class MainWindow(QMainWindow):
         self.host.takeReady.connect(self._on_take_ready)
         self.host.jobDone.connect(self._on_job_done)
         self.host.jobFailed.connect(self._on_job_failed)
+        self.host.profileReady.connect(self._on_profile_ready)
+        self.host.profileFailed.connect(self._on_profile_failed)
 
         self.thread.start()
         self.script_panel.set_busy(True)
@@ -283,13 +307,25 @@ class MainWindow(QMainWindow):
         """What will actually be spoken, after normalization and rules."""
         return self.book.apply(text, self.script_panel.language)
 
-    def _build_request(self, text: str, seed: int) -> SynthRequest:
+    def _build_request(
+        self, text: str, seed: int, use_profile: bool = True
+    ) -> SynthRequest:
         params = self.params_panel.values()
+        profile = self.voice_profile if use_profile else None
+        if profile is not None:
+            # Identity is pinned by the embedding; a slightly cooler talker
+            # keeps rhythm consistent across the batch. The sub-talker follows
+            # only when it is mirroring the main value anyway.
+            capped = min(params["temperature"], CLONE_TEMPERATURE)
+            if params["subtalker_temperature"] == params["temperature"]:
+                params["subtalker_temperature"] = capped
+            params["temperature"] = capped
         return SynthRequest(
             text=self.spoken(text).text,
             instruct=self.design_panel.instruct,
             language=self.script_panel.language,
             seed=seed,
+            voice_profile=profile,
             **params,
         )
 
@@ -360,7 +396,9 @@ class MainWindow(QMainWindow):
             )
             for line in script.lines
         ]
-        request = self._build_request(script.lines[0].text, seed)
+        # Dialogue keeps its per-speaker cast voices — a single fixed embedding
+        # would collapse every character into the same speaker.
+        request = self._build_request(script.lines[0].text, seed, use_profile=False)
         self._submit(
             SynthJob(
                 request=request,
@@ -407,6 +445,92 @@ class MainWindow(QMainWindow):
                 label=f"Audition · {name}",
             ),
             autoplay=True,
+        )
+
+    # ---------- voice profile ----------
+
+    def _import_profile(self, path: str) -> None:
+        """Clone from a user-supplied reference recording."""
+        if self._busy:
+            self.status_label.setText("Busy — try again after the current job.")
+            return
+        self._request_profile_extraction(path, Path(path).stem)
+
+    def _extract_profile_from_description(self) -> None:
+        """Generate a golden sample of the description, then lock its speaker.
+
+        The sample is rendered by the VoiceDesign checkpoint as a normal take
+        (so it can be auditioned and kept); once the job finishes its WAV is
+        handed to the speaker encoder and the embedding becomes the profile.
+        """
+        if self._busy:
+            self.status_label.setText("Busy — try again after the current job.")
+            return
+        name = _profile_name(self.design_panel.instruct)
+        seed = self.params_panel.effective_seed()
+        # use_profile=False: the golden sample must come from the description,
+        # not from whatever profile is currently active.
+        request = self._build_request(
+            self.templates.demo_sentence, seed, use_profile=False
+        )
+        self._capture_profile = name
+        self._submit(
+            SynthJob(
+                request=request,
+                items=[JobItem(text=request.text)],
+                seeds=[seed],
+                mode=SINGLE,
+                label=f"Golden sample · {name}",
+            ),
+            autoplay=True,
+        )
+        if not self._busy:  # _submit refused (model still loading)
+            self._capture_profile = None
+
+    def _request_profile_extraction(self, wav_path: str, name: str) -> None:
+        self._busy = True
+        self.script_panel.set_busy(True)
+        self.design_panel.set_profile_status(None, busy=True)
+        self.status_label.setText(
+            "Extracting voice profile… (first use loads the clone model)"
+        )
+        self.profileRequested.emit(wav_path, name)
+
+    def _on_profile_ready(self, profile: VoiceProfile) -> None:
+        self._busy = False
+        self.script_panel.set_busy(False)
+        self.voice_profile = profile
+        self._profile_path = None
+        try:
+            target = PROFILES_DIR / f"{uuid4().hex[:8]}_{_safe_name(profile.name)}.npz"
+            self._profile_path = profile.save(target)
+        except OSError:
+            pass  # profile still works for this session, it just won't persist
+        self.settings.voice_profile = (
+            str(self._profile_path) if self._profile_path else ""
+        )
+        self.design_panel.set_profile_status(profile.name)
+        self.status_label.setText(
+            f"Voice profile “{profile.name}” locked — every line now shares "
+            "one fixed voice"
+        )
+
+    def _on_profile_failed(self, message: str) -> None:
+        self._busy = False
+        self.script_panel.set_busy(False)
+        self.design_panel.set_profile_status(
+            self.voice_profile.name if self.voice_profile else None
+        )
+        self.status_label.setText("Voice profile extraction failed")
+        QMessageBox.warning(self, "Voice profile", message)
+
+    def _clear_profile(self) -> None:
+        self.voice_profile = None
+        self._profile_path = None
+        self.settings.voice_profile = ""
+        self.design_panel.set_profile_status(None)
+        self.status_label.setText(
+            "Voice profile cleared — the voice follows the description again"
         )
 
     def _on_dialogue_detected(self, script) -> None:
@@ -459,13 +583,9 @@ class MainWindow(QMainWindow):
         without_rule = self.book.apply(phrase, language, skip_rule=rule_id).text
         seed = self.params_panel.seed_spin.value() or new_seed()
 
-        request = SynthRequest(
-            text=with_rule,
-            instruct=self.design_panel.instruct,
-            language=language,
-            seed=seed,
-            **self.params_panel.values(),
-        )
+        # Built through _build_request so the A/B pair is spoken by whichever
+        # voice (profile or description) the script itself would use.
+        request = replace(self._build_request(with_rule, seed), text=with_rule)
         self._ab_capture = []
         self._submit(
             SynthJob(
@@ -538,6 +658,12 @@ class MainWindow(QMainWindow):
             self._last_segments = (take.id, take_audio.segments, take.sample_rate)
         self.takes_panel.refresh()
 
+        if self._capture_profile is not None:
+            # This take is the golden sample; extract its speaker embedding as
+            # soon as the job winds down (see _on_job_done).
+            self._profile_pending = (str(wav_path), self._capture_profile)
+            self._capture_profile = None
+
         if self._ab_capture is not None:
             self._ab_capture.append(take.id)
             if len(self._ab_capture) >= 2:
@@ -570,11 +696,19 @@ class MainWindow(QMainWindow):
         self.status_label.setText(
             "Cancelled" if mode == "cancelled" else "Ready"
         )
+        self._capture_profile = None
+        if self._profile_pending is not None:
+            wav_path, name = self._profile_pending
+            self._profile_pending = None
+            if mode != "cancelled":
+                self._request_profile_extraction(wav_path, name)
 
     def _on_job_failed(self, message: str) -> None:
         self._busy = False
         self.script_panel.set_busy(False)
         self.progress.setVisible(False)
+        self._capture_profile = None
+        self._profile_pending = None
         self.status_label.setText("Generation failed")
         QMessageBox.warning(self, "Generation failed", message)
 
@@ -612,6 +746,13 @@ class MainWindow(QMainWindow):
             subtalker_top_p=take.subtalker_top_p,
             subtalker_top_k=take.subtalker_top_k,
         )
+        if self.voice_profile is not None:
+            # Rerolls follow the active profile so they stay in the same voice.
+            request = replace(
+                request,
+                voice_profile=self.voice_profile,
+                temperature=min(take.temperature, CLONE_TEMPERATURE),
+            )
         self._submit(
             SynthJob(request=request, chunks=[take.text], seeds=[seed], mode=SINGLE),
             autoplay=True,
@@ -738,6 +879,15 @@ class MainWindow(QMainWindow):
         self.params_panel.seed_lock.setChecked(s.seed_locked)
         self.cast_panel.set_cast(s.cast)
         self.cast_panel.lock_voices.setChecked(s.lock_voices)
+        if s.voice_profile:
+            # The embedding was extracted once and saved; restoring it needs no
+            # model at all, so a profile survives restarts for free.
+            try:
+                self.voice_profile = VoiceProfile.load(s.voice_profile)
+                self._profile_path = Path(s.voice_profile)
+                self.design_panel.set_profile_status(self.voice_profile.name)
+            except Exception:
+                s.voice_profile = ""
         if s.seed:
             self.params_panel.show_seed(s.seed)
         if len(s.window_geometry) == 4:
@@ -755,6 +905,11 @@ class MainWindow(QMainWindow):
         s.subtalker_linked = self.params_panel.subtalker_link.isChecked()
         s.cast = self.cast_panel.cast
         s.lock_voices = self.cast_panel.lock_voices.isChecked()
+        s.voice_profile = (
+            str(self._profile_path)
+            if self.voice_profile is not None and self._profile_path is not None
+            else ""
+        )
         s.__dict__.update(self.params_panel.values())
         geo = self.geometry()
         s.window_geometry = [geo.x(), geo.y(), geo.width(), geo.height()]
@@ -775,3 +930,12 @@ class MainWindow(QMainWindow):
 def _safe_name(text: str) -> str:
     keep = [c if c.isalnum() or c in "-_ " else "_" for c in text[:40]]
     return "".join(keep).strip().replace(" ", "_") or "take"
+
+
+def _profile_name(instruct: str) -> str:
+    """A short display name for a profile extracted from a description."""
+    words = instruct.split()
+    if not words:
+        return "Voice profile"
+    name = " ".join(words[:5])
+    return name + "…" if len(words) > 5 else name

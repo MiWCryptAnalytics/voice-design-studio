@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -36,6 +37,52 @@ def _title(text: str) -> QLabel:
     label = QLabel(text)
     label.setProperty("role", "title")
     return label
+
+
+class ReferenceDropZone(QLabel):
+    """Drag-and-drop target for a reference voice recording."""
+
+    fileDropped = pyqtSignal(str)
+
+    _EXTENSIONS = (".wav",)
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setWordWrap(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setText("Drop a reference .wav here")
+        self.setMinimumHeight(metrics().sp(2.2))
+        self._set_active(False)
+
+    def _set_active(self, active: bool) -> None:
+        color = theme.ACCENT if active else theme.TEXT_DIM
+        self.setStyleSheet(
+            f"border: 1px dashed {theme.ACCENT if active else theme.BORDER};"
+            f"border-radius: 3px; color: {color};"
+        )
+
+    def _wav_path(self, event) -> str | None:
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if path and path.lower().endswith(self._EXTENSIONS):
+                return path
+        return None
+
+    def dragEnterEvent(self, event) -> None:
+        if self._wav_path(event):
+            self._set_active(True)
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._set_active(False)
+
+    def dropEvent(self, event) -> None:
+        self._set_active(False)
+        path = self._wav_path(event)
+        if path:
+            event.acceptProposedAction()
+            self.fileDropped.emit(path)
 
 
 class SavePresetDialog(QDialog):
@@ -95,6 +142,9 @@ class DesignPanel(QFrame):
     auditionRequested = pyqtSignal(str, str)  # instruct, display name
     seedApplied = pyqtSignal(int)  # a loaded preset pinned this seed
     libraryChanged = pyqtSignal()  # a voice was saved, deleted or renamed
+    profileImportRequested = pyqtSignal(str)  # path to a reference WAV
+    profileExtractRequested = pyqtSignal()  # golden sample from the description
+    profileCleared = pyqtSignal()  # back to pure text-description mode
 
     def __init__(self, library: VoiceLibrary, parent: QWidget | None = None):
         super().__init__(parent)
@@ -127,6 +177,14 @@ class DesignPanel(QFrame):
         self.detach_hint = QLabel("")
         self.detach_hint.setProperty("role", "hint")
         header.addWidget(self.detach_hint)
+        self.extract_profile_button = QPushButton("Extract Voice Profile")
+        self.extract_profile_button.setToolTip(
+            "Generate a golden sample of this description, then lock its\n"
+            "speaker embedding so every script line reuses that one voice\n"
+            "instead of re-deriving a speaker from the text each time."
+        )
+        self.extract_profile_button.clicked.connect(self._on_extract_profile)
+        header.addWidget(self.extract_profile_button)
         layout.addLayout(header)
 
         self.instruct_edit = QPlainTextEdit()
@@ -138,6 +196,8 @@ class DesignPanel(QFrame):
         self.instruct_edit.textChanged.connect(self._on_instruct_edited)
         layout.addWidget(self.instruct_edit)
 
+        layout.addWidget(self._divider())
+        layout.addLayout(self._build_profile_section())
         layout.addWidget(self._divider())
         layout.addLayout(self._build_library_section(), 1)
 
@@ -255,6 +315,51 @@ class DesignPanel(QFrame):
         row.addWidget(clear)
         return row
 
+    def _build_profile_section(self) -> QVBoxLayout:
+        """Reference-voice cloning: import a WAV or extract from the description.
+
+        While a profile is set, generation conditions on its fixed speaker
+        embedding and the description above is ignored — that is what stops the
+        voice drifting between script lines.
+        """
+        box = QVBoxLayout()
+        box.setSpacing(metrics().sp(0.35))
+
+        header = QHBoxLayout()
+        header.addWidget(_title("VOICE PROFILE"))
+        header.addStretch(1)
+        self.profile_label = QLabel("")
+        self.profile_label.setProperty("role", "hint")
+        header.addWidget(self.profile_label)
+        box.addLayout(header)
+
+        self.drop_zone = ReferenceDropZone()
+        self.drop_zone.fileDropped.connect(self.profileImportRequested.emit)
+        box.addWidget(self.drop_zone)
+
+        row = QHBoxLayout()
+        row.setSpacing(metrics().sp(0.35))
+
+        self.import_profile_button = QPushButton("Import reference WAV…")
+        self.import_profile_button.setToolTip(
+            "Clone a voice from a recording: its speaker embedding is\n"
+            "extracted once and reused for every generated line."
+        )
+        self.import_profile_button.clicked.connect(self._on_import_profile)
+
+        self.clear_profile_button = QPushButton("Clear")
+        self.clear_profile_button.setToolTip(
+            "Drop the profile and go back to designing the voice from text."
+        )
+        self.clear_profile_button.clicked.connect(self._on_clear_profile)
+
+        row.addWidget(self.import_profile_button, 1)
+        row.addWidget(self.clear_profile_button)
+        box.addLayout(row)
+
+        self.set_profile_status(None)
+        return box
+
     def _build_library_section(self) -> QVBoxLayout:
         box = QVBoxLayout()
         box.setSpacing(metrics().sp(0.35))
@@ -353,6 +458,48 @@ class DesignPanel(QFrame):
             )
             return
         self.auditionRequested.emit(instruct, name)
+
+    def _on_import_profile(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a reference voice recording", "", "WAV audio (*.wav)"
+        )
+        if path:
+            self.profileImportRequested.emit(path)
+
+    def _on_extract_profile(self) -> None:
+        if not self.instruct:
+            QMessageBox.information(
+                self,
+                "Nothing to extract",
+                "Write or pick a voice description first — the profile is "
+                "extracted from a golden sample of it.",
+            )
+            return
+        self.profileExtractRequested.emit()
+
+    def _on_clear_profile(self) -> None:
+        self.profileCleared.emit()
+
+    def set_profile_status(self, name: str | None, busy: bool = False) -> None:
+        """Reflect the active profile in the panel (called by MainWindow)."""
+        if busy:
+            self.profile_label.setText("extracting…")
+            self.profile_label.setStyleSheet(f"color: {theme.WARN};")
+        elif name:
+            self.profile_label.setText(f"● {name}")
+            self.profile_label.setStyleSheet(f"color: {theme.GOOD};")
+            self.profile_label.setToolTip(
+                "Every generated line is conditioned on this profile's fixed\n"
+                "speaker embedding — the description above is not used."
+            )
+        else:
+            self.profile_label.setText("none — voice comes from the description")
+            self.profile_label.setStyleSheet(f"color: {theme.TEXT_DIM};")
+            self.profile_label.setToolTip("")
+        self.clear_profile_button.setEnabled(name is not None and not busy)
+        self.import_profile_button.setEnabled(not busy)
+        self.extract_profile_button.setEnabled(not busy)
+        self.drop_zone.setEnabled(not busy)
 
     def _on_trait_changed(self) -> None:
         if self._detached:
