@@ -45,6 +45,10 @@ def main() -> int:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
+
+    from voicestudio.ui.fonts import install_application_font  # noqa: E402
+
+    install_application_font(app)
     if args.pt > 0:
         font = QFont(app.font())
         font.setPointSizeF(args.pt)

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QGuiApplication
+from PyQt6.QtGui import QFont, QFontMetrics, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -91,16 +91,24 @@ def build_pronunciation(app) -> PronunciationWindow:
 
 
 def clipped(root: QWidget) -> list[str]:
-    """Controls whose preferred width exceeds the width they actually got."""
+    """Controls given less space than their style says they need.
+
+    Checks both axes: width clipping truncates text, and height clipping is
+    how table cell widgets (the cast dropdowns) end up spilling over their
+    rows at large scale factors — the table sizes rows from the bare style,
+    not from the QSS the widgets are actually rendered with.
+    """
     bad = []
     for widget in root.findChildren((QPushButton, QComboBox)):
         if not widget.isVisible():
             continue
-        want = widget.sizeHint().width()
-        got = widget.width()
-        if want > got + 1:
-            text = widget.text() if isinstance(widget, QPushButton) else widget.currentText()
-            bad.append(f"{text!r} wants {want}px, got {got}px")
+        text = widget.text() if isinstance(widget, QPushButton) else widget.currentText()
+        if widget.sizeHint().width() > widget.width() + 1:
+            bad.append(f"{text!r} wants {widget.sizeHint().width()}px wide, "
+                       f"got {widget.width()}px")
+        want_h = max(widget.sizeHint().height(), widget.minimumSizeHint().height())
+        if want_h > widget.height() + 1:
+            bad.append(f"{text!r} wants {want_h}px tall, got {widget.height()}px")
     return bad
 
 
@@ -115,6 +123,10 @@ def main() -> int:
         QGuiApplication.highDpiScaleFactorRoundingPolicy()
         == Qt.HighDpiScaleFactorRoundingPolicy.PassThrough,
     )
+
+    from voicestudio.ui.fonts import FAMILY, install_application_font  # noqa: E402
+
+    check("bundled IBM Plex Sans loads", install_application_font(app) == FAMILY)
 
     observed = {}
     for pt in FONT_SIZES:
@@ -153,6 +165,39 @@ def main() -> int:
         check("no clipped buttons or combos", not bad,
               "; ".join(bad[:3]) if bad else "")
 
+        # Platform themes pin per-class fonts (QPushButton, QCheckBox, QLabel,
+        # …) that ignore the application font on X11; the base QWidget rule
+        # must therefore pin font-size to the application point size. Assert
+        # on the stylesheet text — offscreen has no class fonts, so a missing
+        # rule would render correctly here while breaking on real X11.
+        check(
+            "base QSS pins the application font size",
+            f"font-size: {m.pt(1.0)}pt" in app.styleSheet(),
+        )
+        check(
+            "base QSS pins the bundled font family",
+            f'font-family: "{FAMILY}"' in app.styleSheet(),
+        )
+
+        # Combo popups must follow the application font — Qt's default popup
+        # paints via the platform menu delegate, whose font ignores the scaled
+        # app font entirely (see ThemedComboBox).
+        lang = panels["script"].language_combo
+        if lang.count() == 0:
+            panels["script"].set_languages(["Auto", "English", "German"])
+        lang.showPopup()
+        app.processEvents()
+        popup = lang.view()
+        line_height = QFontMetrics(app.font()).height()
+        check(
+            "combo popup follows the application font",
+            abs(popup.font().pointSizeF() - pt) < 0.6
+            and popup.sizeHintForRow(0) >= line_height,
+            f"view {popup.font().pointSizeF():g}pt vs {pt:g}pt, "
+            f"row {popup.sizeHintForRow(0)}px vs line {line_height}px",
+        )
+        lang.hidePopup()
+
         # The pronunciation window is its own top-level window.
         pron = build_pronunciation(app)
         pron.show()
@@ -163,6 +208,26 @@ def main() -> int:
         check("pronunciation window scales with the font",
               pron.width() >= m.ch(100), f"{pron.width()}px wide")
         pron.close()
+
+        # The window must stay shrinkable well below its default size, or
+        # window managers refuse to maximize on screens the default barely
+        # fits — they honour min-size hints, and the unwrapped design column
+        # once pushed the minimum past the work area (the reason it is
+        # scroll-wrapped). 0.92 of the default height catches that state.
+        from voicestudio.ui.main_window import MainWindow  # noqa: E402
+
+        MainWindow._start_engine = lambda self: None  # UI only, no model
+        win = MainWindow()
+        win.cast_panel.setVisible(True)  # worst case: every row present
+        win.show()
+        app.processEvents()
+        min_h = win.minimumSizeHint().height()
+        budget = m.line * 18  # scroll-wrapped columns keep it near ~13 lines
+        check("window minimum height leaves room to maximize",
+              min_h <= budget, f"min {min_h}px vs budget {budget}px")
+        win.hide()
+        win.deleteLater()
+        app.processEvents()
         pron.deleteLater()
 
         root.close()

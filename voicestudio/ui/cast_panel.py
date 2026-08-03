@@ -27,6 +27,7 @@ from ..core.library import VoiceLibrary
 from ..core.templates import load_templates
 from . import theme
 from .metrics import metrics
+from .widgets import ThemedComboBox
 
 UNASSIGNED = "— choose a voice —"
 CURRENT_DESIGN = "Current design panel voice"
@@ -49,7 +50,7 @@ class CastPanel(QFrame):
         layout = QVBoxLayout(self)
         pad = m.sp(0.7)
         layout.setContentsMargins(pad, pad, pad, pad)
-        layout.setSpacing(m.sp(0.35))
+        layout.setSpacing(m.sp(0.15))
 
         header = QHBoxLayout()
         title = QLabel("CAST")
@@ -185,7 +186,7 @@ class CastPanel(QFrame):
             name.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(row, 0, name)
 
-            combo = QComboBox()
+            combo = ThemedComboBox()
             self._fill_combo(combo, self._cast.get(speaker, ""))
             combo.currentIndexChanged.connect(
                 lambda _idx, s=speaker, c=combo: self._on_assigned(s, c)
@@ -198,8 +199,44 @@ class CastPanel(QFrame):
             audition.clicked.connect(lambda _c, s=speaker: self._audition(s))
             self.table.setCellWidget(row, 2, audition)
 
+        self._size_rows()
         self._loading = False
         self._update_status()
+
+    def _size_rows(self) -> None:
+        """Make rows tall enough for their styled cell widgets.
+
+        The table computes default row heights from the bare style, but the
+        combos and buttons in the cells are sized by the QSS, whose padding
+        grows with the application font. At HiDPI scale factors the widgets end
+        up taller than the rows and spill over each other unless the rows are
+        sized from the widgets that actually live in them.
+        """
+        rows = self.table.rowCount()
+        if not rows:
+            return
+
+        need = 0
+        for row in range(rows):
+            for col in (1, 2):
+                widget = self.table.cellWidget(row, col)
+                if widget is not None:
+                    need = max(need, widget.sizeHint().height(),
+                               widget.minimumSizeHint().height())
+        row_height = need + metrics().sp(0.15)
+        self.table.verticalHeader().setDefaultSectionSize(row_height)
+        for row in range(rows):
+            self.table.setRowHeight(row, row_height)
+
+        # Show every speaker up to four without a scrollbar, then scroll.
+        frame = 2 * self.table.frameWidth()
+        header_height = self.table.horizontalHeader().sizeHint().height()
+        shown = min(rows, 4)
+        target = header_height + row_height * shown + frame
+        self.table.setMinimumHeight(
+            min(target, header_height + row_height * 2 + frame)
+        )
+        self.table.setMaximumHeight(target)
 
     def _on_assigned(self, speaker: str, combo: QComboBox) -> None:
         if self._loading:

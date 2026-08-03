@@ -65,7 +65,7 @@ class ParamsPanel(QFrame):
         m = metrics()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(m.sp(0.7), m.sp(0.6), m.sp(0.7), m.sp(0.6))
-        layout.setSpacing(m.sp(0.45))
+        layout.setSpacing(m.sp(0.15))
 
         header = QHBoxLayout()
         title = QLabel("GENERATION")
@@ -80,7 +80,7 @@ class ParamsPanel(QFrame):
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(m.sp(0.6))
-        grid.setVerticalSpacing(m.sp(0.35))
+        grid.setVerticalSpacing(0)
 
         self.temperature = QDoubleSpinBox()
         self.temperature.setRange(0.0, 2.0)
@@ -145,7 +145,7 @@ class ParamsPanel(QFrame):
         container = QWidget()
         box = QVBoxLayout(container)
         box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(m.sp(0.3))
+        box.setSpacing(m.sp(0.15))
 
         header = QHBoxLayout()
         header.setSpacing(m.sp(0.35))
@@ -170,7 +170,7 @@ class ParamsPanel(QFrame):
         grid = QGridLayout(self.subtalker_body)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(m.sp(0.6))
-        grid.setVerticalSpacing(m.sp(0.35))
+        grid.setVerticalSpacing(0)
 
         self.subtalker_temperature = QDoubleSpinBox()
         self.subtalker_temperature.setRange(0.0, 2.0)

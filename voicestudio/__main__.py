@@ -24,14 +24,15 @@ def main() -> int:
 
     # Imported after the QApplication so sizing reads the real application font.
     from .ui import MainWindow
+    from .ui.fonts import install_application_font
     from .ui.metrics import refresh
     from .ui.scaling import apply_auto_scale
     from .ui.theme import build_qss
 
-    # On an unconfigured HiDPI screen (bare X11 on a 4K monitor), enlarge the
-    # application font to match the screen's physical DPI. Everything downstream
-    # sizes off the font, so this one call scales the whole UI. Must run before
-    # metrics/QSS are built.
+    # Order matters: the bundled typeface first (family change only), then the
+    # HiDPI auto-scale (multiplies the size), then metrics/QSS which bake both
+    # into every derived dimension.
+    install_application_font(app)
     apply_auto_scale(app)
 
     app.setStyleSheet(build_qss(refresh()))

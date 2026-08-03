@@ -31,6 +31,7 @@ from ..core.library import VoiceLibrary, VoicePreset
 from ..core.templates import VoiceTemplate, load_templates
 from . import theme
 from .metrics import metrics
+from .widgets import ThemedComboBox
 
 
 def _title(text: str) -> QLabel:
@@ -161,7 +162,7 @@ class DesignPanel(QFrame):
         layout = QVBoxLayout(self)
         pad = m.sp(0.7)
         layout.setContentsMargins(pad, pad, pad, pad)
-        layout.setSpacing(m.sp(0.6))
+        layout.setSpacing(m.sp(0.15))
 
         layout.addWidget(_title("VOICE DESIGN"))
         layout.addLayout(self._build_template_row())
@@ -212,13 +213,13 @@ class DesignPanel(QFrame):
 
     def _build_template_row(self) -> QVBoxLayout:
         box = QVBoxLayout()
-        box.setSpacing(metrics().sp(0.35))
+        box.setSpacing(metrics().sp(0.15))
 
         self.template_search = QLineEdit()
         self.template_search.setPlaceholderText("Search templates…")
         self.template_search.textChanged.connect(self._populate_templates)
 
-        self.template_combo = QComboBox()
+        self.template_combo = ThemedComboBox()
         self.template_combo.activated.connect(self._on_template_chosen)
 
         self.audition_button = QPushButton("Audition")
@@ -276,14 +277,14 @@ class DesignPanel(QFrame):
     def _build_traits_grid(self) -> QGridLayout:
         grid = QGridLayout()
         grid.setHorizontalSpacing(metrics().sp(0.45))
-        grid.setVerticalSpacing(metrics().sp(0.35))
+        grid.setVerticalSpacing(0)
         self.trait_combos: dict[str, QComboBox] = {}
 
         for i, dim in enumerate(traits_mod.DIMENSIONS):
             row, col = divmod(i, 2)
             label = QLabel(dim.label)
             label.setProperty("role", "hint")
-            combo = QComboBox()
+            combo = ThemedComboBox()
             combo.addItems(list(dim.options))
             combo.currentIndexChanged.connect(self._on_trait_changed)
             self.trait_combos[dim.key] = combo
@@ -323,7 +324,7 @@ class DesignPanel(QFrame):
         voice drifting between script lines.
         """
         box = QVBoxLayout()
-        box.setSpacing(metrics().sp(0.35))
+        box.setSpacing(metrics().sp(0.15))
 
         header = QHBoxLayout()
         header.addWidget(_title("VOICE PROFILE"))
@@ -362,7 +363,7 @@ class DesignPanel(QFrame):
 
     def _build_library_section(self) -> QVBoxLayout:
         box = QVBoxLayout()
-        box.setSpacing(metrics().sp(0.35))
+        box.setSpacing(metrics().sp(0.15))
 
         header = QHBoxLayout()
         header.addWidget(_title("MY VOICES"))

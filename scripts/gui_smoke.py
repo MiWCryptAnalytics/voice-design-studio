@@ -61,6 +61,12 @@ def wait_for(signal, timeout_ms: int) -> bool:
 def main() -> int:
     app = QApplication(sys.argv)
 
+    # The bundled typeface must load and become the application family.
+    from voicestudio.ui.fonts import FAMILY, install_application_font  # noqa: E402
+
+    check("bundled IBM Plex Sans loads", install_application_font(app) == FAMILY)
+    check("application font family switched", app.font().family() == FAMILY)
+
     # HiDPI auto-scale: inert headless, but a forced factor must reach the font.
     from voicestudio.ui.scaling import apply_auto_scale  # noqa: E402
 

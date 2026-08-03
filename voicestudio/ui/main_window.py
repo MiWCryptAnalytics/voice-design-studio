@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QScrollArea,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -143,7 +144,7 @@ class MainWindow(QMainWindow):
         player_layout = QVBoxLayout(player_frame)
         pad = m.sp(0.7)
         player_layout.setContentsMargins(pad, pad, pad, pad)
-        player_layout.setSpacing(m.sp(0.45))
+        player_layout.setSpacing(m.sp(0.15))
         player_title = QLabel("PREVIEW")
         player_title.setProperty("role", "title")
         player_layout.addWidget(player_title)
@@ -152,7 +153,7 @@ class MainWindow(QMainWindow):
         center = QWidget()
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(m.sp(0.6))
+        center_layout.setSpacing(m.sp(0.15))
         center_layout.addWidget(self.script_panel, 3)
         center_layout.addWidget(self.cast_panel, 0)
         center_layout.addWidget(self.params_panel, 0)
@@ -164,9 +165,14 @@ class MainWindow(QMainWindow):
         self.takes_panel.restoreRequested.connect(self._restore_params)
         self.takes_panel.exportRequested.connect(self._export_take)
 
+        # Unwrapped, the tallest column's minimum height becomes the *window's*
+        # minimum height, and at large UI scales that exceeds the work area —
+        # window managers honour min-size hints and then refuse to maximize.
+        # Scroll-wrapping the columns keeps the window shrinkable; the
+        # scrollbars only appear when the window really is too short.
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.design_panel)
-        splitter.addWidget(center)
+        splitter.addWidget(_shrinkable(self.design_panel))
+        splitter.addWidget(_shrinkable(center))
         splitter.addWidget(self.takes_panel)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 4)
@@ -891,7 +897,18 @@ class MainWindow(QMainWindow):
         if s.seed:
             self.params_panel.show_seed(s.seed)
         if len(s.window_geometry) == 4:
-            self.setGeometry(*s.window_geometry)
+            # Saved under a different scale factor (or monitor), the stored
+            # geometry can exceed the screen — clamp it, or the window comes
+            # back taller than the work area and can't be managed sensibly.
+            x, y, width, height = s.window_geometry
+            screen = QGuiApplication.primaryScreen()
+            if screen is not None:
+                avail = screen.availableGeometry()
+                width = min(width, avail.width())
+                height = min(height, avail.height())
+                x = max(avail.left(), min(x, avail.right() - width + 1))
+                y = max(avail.top(), min(y, avail.bottom() - height + 1))
+            self.setGeometry(x, y, width, height)
 
     def closeEvent(self, event) -> None:
         s = self.settings
@@ -925,6 +942,24 @@ class MainWindow(QMainWindow):
         self.thread.quit()
         self.thread.wait(5000)
         super().closeEvent(event)
+
+
+def _shrinkable(panel: QWidget) -> QScrollArea:
+    """Wrap a column so its content minimum can't become the window minimum.
+
+    Full width is preserved (content never scrolls sideways); vertically the
+    column scrolls instead of forbidding the window from shrinking.
+    """
+    scroll = QScrollArea()
+    scroll.setWidget(panel)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setMinimumWidth(
+        panel.minimumSizeHint().width()
+        + scroll.verticalScrollBar().sizeHint().width()
+    )
+    return scroll
 
 
 def _safe_name(text: str) -> str:

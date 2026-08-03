@@ -47,11 +47,18 @@ def build_qss(m: Metrics | None = None) -> str:
     scroll_w = m.sp(0.55)
 
     return f"""
-/* Base widgets inherit the application font — never pin a pixel size here,
-   or the UI stops following the user's font/DPI settings. */
+/* The base font size is pinned to the application font on purpose. Several
+   widget classes (QPushButton, QCheckBox, QLabel, item views, …) otherwise
+   resolve their font from platform-theme class defaults captured at login
+   and ignore a scaled application font entirely — text renders half-size at
+   a 2x UI scale. m.pt(1.0) IS the application font in points, re-derived
+   every launch, so this still follows the user's font/DPI settings; it just
+   makes every widget class do so. Never pin a *pixel* size here. */
 QWidget {{
     background: {BG};
     color: {TEXT};
+    font-family: "{m.family}";
+    font-size: {m.pt(1.0)}pt;
 }}
 QLabel, QCheckBox {{ background: transparent; }}
 QLabel[role="title"] {{
@@ -171,10 +178,22 @@ QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QStatusBar {{ background: {PANEL}; border-top: 1px solid {BORDER}; }}
 QStatusBar::item {{ border: none; }}
 
+QMenuBar {{ background: {BG}; }}
+QMenuBar::item:selected {{ background: {PANEL_ALT}; }}
+QMenu {{
+    background: {PANEL_ALT};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+}}
+QMenu::item {{ padding: {max(2, pad_y - 1)}px {pad_x * 2}px; }}
+QMenu::item:selected {{ background: {ACCENT_DIM}; }}
+QMenu::item:disabled {{ color: {TEXT_DIM}; }}
+
 QToolTip {{
     background: {PANEL_ALT};
     color: {TEXT};
     border: 1px solid {BORDER};
     padding: {max(2, pad_y - 2)}px;
+    font-size: {m.pt(0.92)}pt;
 }}
 """

@@ -41,6 +41,7 @@ from ..core.normalize import (
 from ..core.pronounce import ANY_LANGUAGE, PronunciationBook, PronunciationRule
 from . import theme
 from .metrics import metrics
+from .widgets import ThemedComboBox
 
 # Kept short so Match and Say-as — the columns that actually hold content — get
 # the width. Full meanings live in the header tooltips.
@@ -299,7 +300,7 @@ class PronunciationWindow(QDialog):
         self.table.setItem(row, col, item)
 
     def _set_language(self, row: int, col: int, rule: PronunciationRule) -> None:
-        combo = QComboBox()
+        combo = ThemedComboBox()
         combo.addItem(ANY_LANGUAGE)
         combo.addItems([lang for lang in self._languages() if lang != "Auto"])
         combo.setCurrentText(rule.language)

@@ -23,6 +23,7 @@ class Metrics:
         if pt <= 0:
             pt = font.pixelSize() * 0.75 if font.pixelSize() > 0 else 10.0
         self.base_pt = pt
+        self.family = font.family()
         self.line = max(12, fm.height())
         self.char = max(5, fm.horizontalAdvance("0"))
 

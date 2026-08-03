@@ -111,4 +111,5 @@ that reproduce the numbers, lives in [DESIGN.md](DESIGN.md).
 [GPL-3.0](LICENSE). Dependencies: [PyQt6](https://riverbankcomputing.com/software/pyqt/)
 is GPL v3; the [`qwen-tts`](https://pypi.org/project/qwen-tts/) package and the
 [Qwen3-TTS model weights](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign)
-are Apache-2.0.
+are Apache-2.0. The UI bundles the [IBM Plex Sans](https://github.com/IBM/plex)
+typeface (SIL OFL 1.1 — license included alongside the font files).

@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from ..core import dialogue as dialogue_mod
 from ..core.script import split_script
 from .metrics import metrics
+from .widgets import ThemedComboBox
 
 
 def _title(text: str) -> QLabel:
@@ -41,7 +42,7 @@ class ScriptPanel(QFrame):
         layout = QVBoxLayout(self)
         pad = m.sp(0.7)
         layout.setContentsMargins(pad, pad, pad, pad)
-        layout.setSpacing(m.sp(0.45))
+        layout.setSpacing(m.sp(0.15))
 
         header = QHBoxLayout()
         header.addWidget(_title("SCRIPT"))
@@ -67,7 +68,7 @@ class ScriptPanel(QFrame):
 
         lang_label = QLabel("Language")
         lang_label.setProperty("role", "hint")
-        self.language_combo = QComboBox()
+        self.language_combo = ThemedComboBox()
         self.language_combo.addItems(["Auto", "English"])
         self.language_combo.setMinimumWidth(metrics().ch(11))
 

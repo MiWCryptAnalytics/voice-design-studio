@@ -198,17 +198,59 @@ desktops actually scale text. Sizing off font metrics covers all three.
 **Auto-scale on unconfigured screens.** Font-derived sizing only helps once
 something sets a sensible font or scale — and a bare X11 session on a 4K
 monitor sets neither: Qt reports 96 logical DPI and everything renders tiny. At
-startup ([scaling.py](voicestudio/ui/scaling.py)) the app compares the primary
-screen's *physical* DPI against the 96 baseline and enlarges the application
-font to match, which scales the entire UI in one move. It only acts when
-nothing else has: any `QT_*` scaling override, a devicePixelRatio above 1
-(Wayland, configured X11), or logical DPI above ~110 (`Xft.dpi`) all mean
-scaling is somebody else's job, and screens whose EDID-reported size is
-implausible (below 50 or above 400 DPI — TVs and projectors routinely lie) are
-left alone. The factor moves in quarter steps and caps at 3×.
+startup ([scaling.py](voicestudio/ui/scaling.py)) the app derives a factor from
+the primary screen's *physical* DPI and enlarges the application font to match,
+which scales the entire UI in one move. It only acts when nothing else has: any
+`QT_*` scaling override, a devicePixelRatio above 1 (Wayland, configured X11),
+or logical DPI above ~110 (`Xft.dpi`) all mean scaling is somebody else's job;
+screens whose EDID-reported size is implausible (below 50 or above 400 DPI —
+TVs and projectors routinely lie) and screens under 120 physical DPI (ordinary
+1080p/1440p monitors, conventionally run unscaled) are left alone. The factor
+is physical DPI ÷ 80 rather than ÷ 96: exact physical parity measured as too
+small on a real 4K desk — the first user preferred ×2 over the parity ×1.75 on
+a 159 DPI monitor — so the baseline bakes in roughly 20% extra, landing
+27-inch 4K at ×2. It moves in quarter steps and caps at 3×.
 `VOICESTUDIO_SCALE=<factor>` forces it; `VOICESTUDIO_SCALE=1` disables it. The
 decision ladder is a pure function, unit-tested across the monitor zoo in
 [unit_tests.py](scripts/unit_tests.py).
+
+**Platform class fonts.** Scaling the application font is not enough on X11:
+platform themes register per-class default fonts (`QPushButton`, `QCheckBox`,
+`QLabel`, item views, menus, tooltips) captured at login, and widgets of those
+classes ignore `QApplication::setFont` — buttons and checkboxes rendered at
+half size at a 2× UI scale while spin boxes followed. The stylesheet therefore
+pins `font-size` to the application point size in its base `QWidget` rule;
+`build_qss()` re-derives it from the live font each launch, so it still
+follows the user's settings — it just forces every widget class to. Combo
+popups need one step more: their default *menu-mode* delegate takes the
+platform menu font regardless of widget fonts, so `ThemedComboBox`
+([widgets.py](voicestudio/ui/widgets.py)) installs a styled item delegate and
+syncs the popup view's font as it opens. `hidpi_check.py` guards both — note
+that the offscreen test platform registers no class fonts, which is exactly
+why these bugs never showed up headless.
+
+**A shrinkable window, or maximize breaks.** Window managers honour min-size
+hints; if the window's layout-derived minimum exceeds the work area, Xfwm4
+(and others) set the maximized *state* but refuse the resize — the maximize
+button appears dead. At ×2 the unwrapped design column alone declared a
+~2000px minimum height, which is exactly how that manifested on a 4K screen.
+The left and center columns are therefore wrapped in vertical scroll areas
+(`_shrinkable` in [main_window.py](voicestudio/ui/main_window.py)): identical
+rendering when everything fits, scrolling instead of a hard floor when it
+doesn't, and the window minimum stays near ~13 text lines. Restored window
+geometry is also clamped to the current screen, since a geometry saved under
+a different scale factor can exceed it. `hidpi_check.py` asserts the minimum
+stays under 18 lines at every font size.
+
+**Typeface.** The UI ships [IBM Plex Sans](https://github.com/IBM/plex)
+(SIL OFL 1.1, bundled with its license in `voicestudio/assets/fonts/`).
+[fonts.py](voicestudio/ui/fonts.py) registers the faces at startup and
+switches the application font's *family only* — the size is untouched, so the
+DPI and auto-scale logic is unaffected — and the base `QWidget` rule pins the
+family for the same platform-class-font reason as the size. Regular, SemiBold
+and Bold cover the weights the stylesheet and item fonts use (400/600/700).
+If the bundle is missing the system font stays: a cosmetic downgrade, never an
+error.
 
 Fractional scale factors are preserved (`PassThrough` rounding), so 125% and
 150% aren't rounded to 100% or 200%. The usual Qt knobs all work:

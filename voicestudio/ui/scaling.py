@@ -16,7 +16,7 @@ The decision defers to anything explicit, in this order:
 3. A devicePixelRatio above 1 — the platform already scales (Wayland, or a
    properly configured X11).
 4. Logical DPI above ~110 — the desktop scales through fonts (`Xft.dpi`).
-5. Otherwise: factor = physical DPI / 96, in quarter steps, only when the
+5. Otherwise: factor = physical DPI / 80, in quarter steps, only when the
    screen is meaningfully HiDPI, ignoring screens whose EDID-reported size is
    nonsense (projectors and TVs routinely lie).
 """
@@ -38,11 +38,20 @@ QT_SCALE_OVERRIDES = (
 
 FORCE_ENV = "VOICESTUDIO_SCALE"
 
-BASELINE_DPI = 96.0
+# The divisor for physical DPI. 96 would be exact physical parity with a
+# standard-DPI layout, but parity measured as too small on a real 4K desk —
+# the first user immediately preferred x2 over the parity x1.75 on a 159 DPI
+# monitor — so the baseline bakes in ~20% extra. 159/80 lands that screen at
+# x2 while normal-DPI screens (≤ ~100 DPI) still fall below MIN_AUTO_FACTOR.
+BASELINE_DPI = 80.0
 # Below this logical DPI the desktop clearly hasn't configured font scaling.
 CONFIGURED_LOGICAL_DPI = 110.0
 # Physical DPI outside this range means the screen is lying about its size.
 PLAUSIBLE_PHYSICAL_DPI = (50.0, 400.0)
+# Only screens at least this dense count as HiDPI. Keeps the comfort baseline
+# from touching ordinary 1080p/1440p monitors (a 27" 1440p is 109 DPI and is
+# conventionally run unscaled).
+HIDPI_MIN_PHYSICAL_DPI = 120.0
 # Don't bother scaling for less than this — it reads as jitter, not intent.
 MIN_AUTO_FACTOR = 1.25
 FACTOR_RANGE = (0.5, 3.0)
@@ -75,6 +84,8 @@ def pick_scale(
         return 1.0
     low, high = PLAUSIBLE_PHYSICAL_DPI
     if not (low <= physical_dpi <= high):
+        return 1.0
+    if physical_dpi < HIDPI_MIN_PHYSICAL_DPI:
         return 1.0
 
     factor = physical_dpi / BASELINE_DPI
