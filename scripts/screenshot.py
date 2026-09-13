@@ -6,8 +6,15 @@ desktops scale — useful for checking the layout holds up.
 """
 
 import argparse
+import os
 import sys
+import tempfile
 from pathlib import Path
+
+# Isolate app state before voicestudio.core.config computes its paths: the
+# repo screenshot must not show the user's real takes/presets, and the run
+# must not overwrite their saved session on close.
+os.environ["XDG_DATA_HOME"] = tempfile.mkdtemp(prefix="voicestudio-shot-")
 
 from PyQt6.QtCore import Qt, QEventLoop, QTimer
 from PyQt6.QtGui import QFont, QGuiApplication
@@ -17,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from voicestudio.ui.main_window import MainWindow  # noqa: E402
-from voicestudio.ui.metrics import refresh  # noqa: E402
+from voicestudio.ui.metrics import metrics, refresh  # noqa: E402
 from voicestudio.ui.theme import build_qss  # noqa: E402
 
 
@@ -57,6 +64,13 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
+
+    # The window clamps its default size to the screen and may restore a
+    # smaller saved geometry; the screenshot wants the layout's natural size,
+    # and never less than the layout minimum — below it columns get clipped.
+    m = metrics()
+    hint = window.minimumSizeHint()
+    window.resize(max(m.ch(185), hint.width()), max(m.sp(52), hint.height()))
 
     wait_for(window.host.loadReady, 180_000)
     settle(app)
